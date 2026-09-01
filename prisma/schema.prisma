@@ -1,0 +1,310 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WebhookDeliveryStatus {
+  RECEIVED
+  QUEUED
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+enum ReminderType {
+  DUE_SOON_INACTIVE
+  OVERDUE
+  REVIEW_WAITING
+  MISSING_PROGRESS
+}
+
+enum ReminderResponseStatus {
+  PENDING
+  STILL_WORKING
+  BLOCKED
+  COMPLETED
+  SNOOZED
+  NOT_ASSIGNEE
+}
+
+enum ProposalType {
+  PROGRESS_UPDATE
+  STATUS_UPDATE
+  ISSUE_DRAFT
+  ISSUE_CREATION
+  PR_ISSUE_LINK
+  TARGET_DATE_CHANGE
+  DOCUMENT_UPDATE
+}
+
+enum ProposalStatus {
+  PROPOSED
+  CONFIRMED
+  REJECTED
+  EXPIRED
+  EXECUTED
+  FAILED
+}
+
+enum LeaveNoticeStatus {
+  PROPOSED
+  CONFIRMED
+  CANCELLED
+}
+
+enum DailyReportStatus {
+  OPENING
+  OPEN
+  SUMMARIZED
+}
+
+model Person {
+  id            String          @id @default(uuid()) @db.Uuid
+  displayName   String          @map("display_name")
+  discordUserId String          @unique @map("discord_user_id")
+  githubLogin   String          @unique @map("github_login")
+  githubUserId  String?         @map("github_user_id")
+  timezone      String          @default("Asia/Taipei")
+  enabled       Boolean         @default(true)
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+  reminders     ReminderState[]
+  leaveNotices  LeaveNotice[]
+
+  @@map("people")
+}
+
+model ProjectBinding {
+  id                   String               @id @default(uuid()) @db.Uuid
+  name                 String
+  discordGuildId       String               @map("discord_guild_id")
+  discordChannelId     String               @map("discord_channel_id")
+  githubOrganization   String               @map("github_organization")
+  githubProjectId      String?              @map("github_project_id")
+  githubInstallationId String               @map("github_installation_id")
+  summaryChannelId     String?              @map("summary_channel_id")
+  leaveChannelId       String?              @map("leave_channel_id")
+  enabled              Boolean              @default(true)
+  configJson           Json                 @map("config_json")
+  createdAt            DateTime             @default(now()) @map("created_at")
+  updatedAt            DateTime             @updatedAt @map("updated_at")
+  repositories         RepositoryBinding[]
+  messageIssueLinks    MessageIssueLink[]
+  documents            DocumentBinding[]
+  dailyReportSessions  DailyReportSession[]
+
+  @@unique([discordGuildId, discordChannelId])
+  @@index([githubOrganization, githubProjectId])
+  @@map("project_bindings")
+}
+
+model RepositoryBinding {
+  id                   String         @id @default(uuid()) @db.Uuid
+  projectBindingId     String         @map("project_binding_id") @db.Uuid
+  githubRepositoryId   String?        @map("github_repository_id")
+  githubInstallationId String?        @map("github_installation_id")
+  owner                String
+  name                 String
+  enabled              Boolean        @default(true)
+  createdAt            DateTime       @default(now()) @map("created_at")
+  updatedAt            DateTime       @updatedAt @map("updated_at")
+  projectBinding       ProjectBinding @relation(fields: [projectBindingId], references: [id], onDelete: Cascade)
+
+  @@unique([owner, name])
+  @@index([projectBindingId])
+  @@map("repository_bindings")
+}
+
+model DailyReportSession {
+  id                     String            @id @default(uuid()) @db.Uuid
+  projectBindingId       String            @map("project_binding_id") @db.Uuid
+  reportDate             String            @map("report_date")
+  status                 DailyReportStatus @default(OPENING)
+  discordChannelId       String            @map("discord_channel_id")
+  reminderMessageId      String?           @unique @map("reminder_message_id")
+  discordThreadId        String?           @unique @map("discord_thread_id")
+  expectedDiscordUserIds String[]          @map("expected_discord_user_ids")
+  responseSnapshot       Json?             @map("response_snapshot")
+  summarySnapshot        Json?             @map("summary_snapshot")
+  summaryMessageIds      String[]          @default([]) @map("summary_message_ids")
+  openedAt               DateTime?         @map("opened_at")
+  closesAt               DateTime          @map("closes_at")
+  summarizedAt           DateTime?         @map("summarized_at")
+  createdAt              DateTime          @default(now()) @map("created_at")
+  updatedAt              DateTime          @updatedAt @map("updated_at")
+  projectBinding         ProjectBinding    @relation(fields: [projectBindingId], references: [id], onDelete: Cascade)
+
+  @@unique([projectBindingId, reportDate])
+  @@index([status, closesAt])
+  @@map("daily_report_sessions")
+}
+
+model WebhookDelivery {
+  id           String                @id @default(uuid()) @db.Uuid
+  provider     String
+  deliveryId   String                @map("delivery_id")
+  eventType    String                @map("event_type")
+  status       WebhookDeliveryStatus @default(RECEIVED)
+  payloadHash  String                @map("payload_hash")
+  receivedAt   DateTime              @default(now()) @map("received_at")
+  processedAt  DateTime?             @map("processed_at")
+  errorMessage String?               @map("error_message")
+  retryCount   Int                   @default(0) @map("retry_count")
+
+  @@unique([provider, deliveryId])
+  @@index([status, receivedAt])
+  @@map("webhook_deliveries")
+}
+
+model ReminderState {
+  id             String                 @id @default(uuid()) @db.Uuid
+  personId       String                 @map("person_id") @db.Uuid
+  providerItemId String                 @map("provider_item_id")
+  reminderType   ReminderType           @map("reminder_type")
+  lastSentAt     DateTime?              @map("last_sent_at")
+  snoozedUntil   DateTime?              @map("snoozed_until")
+  responseStatus ReminderResponseStatus @default(PENDING) @map("response_status")
+  metadataJson   Json                   @map("metadata_json")
+  createdAt      DateTime               @default(now()) @map("created_at")
+  updatedAt      DateTime               @updatedAt @map("updated_at")
+  person         Person                 @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@unique([personId, providerItemId, reminderType])
+  @@index([snoozedUntil])
+  @@map("reminder_states")
+}
+
+model LeaveNotice {
+  id                String            @id @default(uuid()) @db.Uuid
+  personId          String            @map("person_id") @db.Uuid
+  startAt           DateTime          @map("start_at")
+  endAt             DateTime          @map("end_at")
+  sourceMessageId   String            @map("source_message_id")
+  sourceChannelId   String            @map("source_channel_id")
+  morningNotifiedAt DateTime?         @map("morning_notified_at")
+  createdBy         String            @map("created_by")
+  status            LeaveNoticeStatus @default(PROPOSED)
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+  person            Person            @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@index([personId, startAt, endAt])
+  @@index([status, startAt, morningNotifiedAt])
+  @@map("leave_notices")
+}
+
+model MessageIssueLink {
+  id                String          @id @default(uuid()) @db.Uuid
+  projectBindingId  String?         @map("project_binding_id") @db.Uuid
+  discordGuildId    String          @map("discord_guild_id")
+  discordChannelId  String          @map("discord_channel_id")
+  discordMessageId  String          @unique @map("discord_message_id")
+  discordThreadId   String?         @map("discord_thread_id")
+  githubRepository  String          @map("github_repository")
+  githubIssueNumber Int             @map("github_issue_number")
+  createdBy         String          @map("created_by")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  projectBinding    ProjectBinding? @relation(fields: [projectBindingId], references: [id], onDelete: SetNull)
+
+  @@index([githubRepository, githubIssueNumber])
+  @@map("message_issue_links")
+}
+
+model AiProposal {
+  id                 String         @id @default(uuid()) @db.Uuid
+  proposalType       ProposalType   @map("proposal_type")
+  status             ProposalStatus @default(PROPOSED)
+  requestedBy        String         @map("requested_by")
+  sourceType         String         @map("source_type")
+  sourceReference    Json           @map("source_reference")
+  inputJson          Json           @map("input_json")
+  proposedActionJson Json           @map("proposed_action_json")
+  confidence         Float?
+  confirmedBy        String?        @map("confirmed_by")
+  confirmedAt        DateTime?      @map("confirmed_at")
+  executedAt         DateTime?      @map("executed_at")
+  errorMessage       String?        @map("error_message")
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@index([requestedBy])
+  @@map("ai_proposals")
+}
+
+model DocumentBinding {
+  id                String         @id @default(uuid()) @db.Uuid
+  projectBindingId  String         @map("project_binding_id") @db.Uuid
+  provider          String         @default("google_docs")
+  documentId        String         @map("document_id")
+  documentUrl       String         @map("document_url")
+  displayName       String         @map("display_name")
+  allowedOperations String[]       @map("allowed_operations")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+  projectBinding    ProjectBinding @relation(fields: [projectBindingId], references: [id], onDelete: Cascade)
+
+  @@unique([projectBindingId, provider, documentId])
+  @@index([documentId])
+  @@map("document_bindings")
+}
+
+model CalendarNotification {
+  id               String   @id @default(uuid()) @db.Uuid
+  calendarId       String   @map("calendar_id")
+  eventId          String   @map("event_id")
+  eventStartAt     DateTime @map("event_start_at")
+  notificationType String   @map("notification_type")
+  sentAt           DateTime @default(now()) @map("sent_at")
+
+  @@unique([calendarId, eventId, eventStartAt, notificationType])
+  @@map("calendar_notifications")
+}
+
+model AlertEvent {
+  id               String    @id @default(uuid()) @db.Uuid
+  source           String
+  fingerprint      String
+  service          String
+  environment      String
+  severity         String
+  status           String
+  title            String
+  description      String
+  dashboardUrl     String?   @map("dashboard_url")
+  runbookUrl       String?   @map("runbook_url")
+  discordMessageId String?   @map("discord_message_id")
+  discordThreadId  String?   @map("discord_thread_id")
+  assignedTo       String?   @map("assigned_to")
+  mutedUntil       DateTime? @map("muted_until")
+  startedAt        DateTime  @map("started_at")
+  resolvedAt       DateTime? @map("resolved_at")
+  payloadJson      Json      @map("payload_json")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@unique([source, fingerprint, environment])
+  @@index([status, severity, startedAt])
+  @@map("alert_events")
+}
+
+model AuditLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  actorType    String   @map("actor_type")
+  actorId      String   @map("actor_id")
+  action       String
+  resourceType String   @map("resource_type")
+  resourceId   String   @map("resource_id")
+  beforeJson   Json?    @map("before_json")
+  afterJson    Json?    @map("after_json")
+  requestId    String   @map("request_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([resourceType, resourceId])
+  @@index([requestId])
+  @@map("audit_logs")
+}

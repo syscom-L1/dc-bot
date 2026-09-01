@@ -1,0 +1,60 @@
+{
+  "name": "dcbot-team-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Discord-first team work assistant backed by GitHub Projects",
+  "type": "module",
+  "packageManager": "pnpm@10.18.3",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev:http": "tsx watch src/entrypoints/http.ts",
+    "dev:bot": "tsx watch src/entrypoints/bot.ts",
+    "dev:worker": "tsx watch src/entrypoints/worker.ts",
+    "dev:scheduler": "tsx watch src/entrypoints/scheduler.ts",
+    "start:http": "node dist/entrypoints/http.js",
+    "start:bot": "node dist/entrypoints/bot.js",
+    "start:worker": "node dist/entrypoints/worker.js",
+    "start:scheduler": "node dist/entrypoints/scheduler.js",
+    "commands:register": "tsx scripts/register-discord-commands.ts",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "npm run lint && npm run test && npm run build"
+  },
+  "pnpm": {
+    "overrides": {
+      "deepmerge-ts": "8.0.0"
+    }
+  },
+  "dependencies": {
+    "@octokit/app": "^16.1.2",
+    "@octokit/rest": "^22.0.0",
+    "@prisma/client": "6.19.3",
+    "bullmq": "^5.61.2",
+    "discord.js": "^14.24.2",
+    "dotenv": "^17.2.3",
+    "fastify": "^5.6.1",
+    "fastify-raw-body": "^5.0.0",
+    "googleapis": "^176.0.0",
+    "ioredis": "^5.8.2",
+    "pino": "^9.14.0",
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "3.25.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^22.18.12",
+    "eslint": "^9.39.1",
+    "prisma": "6.19.3",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.4",
+    "vitest": "^3.2.4"
+  }
+}
