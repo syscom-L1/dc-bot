@@ -1,13 +1,21 @@
 import type { Client, Message } from 'discord.js';
 import type { Logger } from 'pino';
 import { discordErrorMessage } from '../common/errors.js';
-import type { AiDiscussionService, DiscussionMessage } from '../ai/discussion-service.js';
+import type { AiDiscussionService, DiscussionInput, DiscussionMessage } from '../ai/discussion-service.js';
 import type { DiscordAdapter, GitHubAdapter } from '../domain/adapters.js';
 import type { ProjectBindingStore } from '../persistence/contracts.js';
 import type { DiscordAccessPolicy } from './access-policy.js';
 
-function asksForAssessment(prompt: string): boolean {
-  return /(評估|可不可行|可行性|比較|方案|影響哪些|風險|拆成任務)/u.test(prompt);
+export type DiscussionIntent = 'answer' | 'summary' | 'assessment';
+
+export function resolveDiscussionIntent(prompt: string): DiscussionIntent {
+	if (/(評估|可不可行|可行性|比較|影響哪些|風險|拆成任務)/u.test(prompt)) {
+		return 'assessment';
+	}
+	if (/(整理|摘要|統整|總結|歸納)/u.test(prompt)) {
+		return 'summary';
+	}
+	return 'answer';
 }
 
 function toDiscussionMessage(message: Message): DiscussionMessage {
@@ -45,6 +53,17 @@ export class DiscordAiDiscussionHandler {
     });
   }
 
+	private async generateResponse(intent: DiscussionIntent, input: DiscussionInput): Promise<string[]> {
+		switch (intent) {
+			case 'assessment':
+				return this.discussions.assess(input);
+			case 'summary':
+				return this.discussions.summarize(input);
+			case 'answer':
+				return this.discussions.answer(input);
+		}
+	}
+
   private async handle(message: Message, botUserId: string): Promise<void> {
     if (!message.inGuild() || !this.policy.isGuildAllowed(message.guildId)) return;
     const bindingChannelId = message.channel.isThread() ? message.channel.parentId : message.channelId;
@@ -69,7 +88,7 @@ export class DiscordAiDiscussionHandler {
     };
     await refreshTyping();
     const statusMessage = await message.reply({
-      content: '⏳ 正在讀取 GitHub 與整理討論…',
+      content: '⏳ 正在查閱討論與 GitHub 狀態…',
       allowedMentions: { repliedUser: false },
     });
     const typingTimer = setInterval(() => {
@@ -88,9 +107,10 @@ export class DiscordAiDiscussionHandler {
             .map(toDiscussionMessage)
         : [toDiscussionMessage(message)];
       const workItems = await this.github.listWorkItems(project);
-      const response = asksForAssessment(prompt)
-        ? await this.discussions.assess({ project, prompt, messages, workItems })
-        : await this.discussions.summarize({ project, prompt, messages, workItems });
+      const response = await this.generateResponse(
+				resolveDiscussionIntent(prompt),
+				{ project, prompt, messages, workItems },
+			);
       const [firstChunk, ...remainingChunks] = response;
       if (!firstChunk) throw new Error('AI discussion returned no Discord message chunks');
       await statusMessage.edit({

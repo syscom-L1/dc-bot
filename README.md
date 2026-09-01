@@ -11,7 +11,7 @@
 - Asia/Taipei 每日／每週摘要、即將到期／逾期／無活動／等待 Review 風險規則。
 - 到期提醒 DM；「還在進行」先顯示預覽，只有本人確認後才寫入 Issue comment／Project status，並建立 Audit Log。
 - Discord 訊息右鍵「建立 GitHub Issue」：LLM 結構化草稿、預覽／修改／取消／確認、Issue 建立與 Project 加入。
-- `@Bot` 討論整理與可行性評估：最多讀取 30 則近期訊息與即時 GitHub 工作項目，分開列出已確認事實、推論與未知資訊，不直接寫入外部系統。
+- `@Bot` 一般問答、討論整理與可行性評估：最多讀取 30 則近期訊息與即時 GitHub 工作項目，分開列出已確認事實、推論與未知資訊，不直接寫入外部系統。
 - 請假自然語言解析、確認／修改／取消、即時與當日上午通知；只保存人員與時間，不保存原因或假別；確認請假期間會抑制進度提醒。
 - Google Docs allowlist、Heading／Named Range／marker／append 定位、留言或寫入、revision lock、diff 與大範圍修改二次確認。
 - Google Calendar 每日行程與會前提醒，使用資料庫 unique key 防止重複通知。
@@ -90,7 +90,9 @@ corepack pnpm@10.18.3 commands:register
 一般成員只需：
 
 - 每天：在 16:30 回報 Thread 補充一兩句 GitHub 看不到的資訊
+- 一般問答：在專案頻道 `@Bot 這個 timeout 可能是什麼原因？`
 - 討論整理：在專案頻道 `@Bot 幫我整理目前討論重點`
+- 可行性評估：在專案頻道 `@Bot 評估這個方案的風險`
 - 建立 Issue：訊息右鍵「Apps → 建立 GitHub Issue」
 - 使用說明：`/bot help`
 

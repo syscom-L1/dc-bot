@@ -10,35 +10,53 @@ import { AiDiscussionService } from '../../src/ai/discussion-service.js';
 import { projectBindingConfigSchema, type ProjectContext } from '../../src/domain/models.js';
 
 class SchemaAwareLlm implements LlmAdapter {
+	public lastSystem = '';
+	public lastUser = '';
+
   public async generateStructured<T>(request: StructuredLlmRequest<T>): Promise<StructuredLlmResponse<T>> {
-    const value = request.schemaName === 'discord_discussion_summary'
-      ? {
-          confirmedFacts: ['A webhook endpoint exists'],
-          reasonableInferences: ['Queue load should remain low'],
-          pendingQuestions: ['Which repository?'],
-          conclusions: ['Use human confirmation'],
-          decisions: [],
-          actionItems: [{ task: 'Create tests', suggestedAssignee: null, suggestedTargetDate: null }],
-        }
-      : {
-          confirmedFacts: ['The service uses Fastify'],
-          reasonableInferences: [],
-          pendingQuestions: ['Expected throughput?'],
-          problemDefinition: 'Evaluate the proposed change.',
-          knownRequirements: ['Keep GitHub as source of truth'],
-          constraints: ['No direct AI writes'],
-          missingInformation: ['Load target'],
-          candidateSolutions: [{ name: 'Adapter', description: 'Add an adapter.', pros: ['Isolated'], cons: ['More code'] }],
-          recommendation: 'Use the adapter.',
-          technicalDependencies: ['Fastify'],
-          securityRisks: ['Untrusted input'],
-          performanceRisks: ['Provider latency'],
-          validationPlan: ['Integration test'],
-          technicalSpike: ['Measure latency'],
-          implementationTasks: ['Add schema'],
-          acceptanceCriteria: ['Tests pass'],
-          teamDecisionsNeeded: ['Choose provider'],
-        };
+		this.lastSystem = request.system;
+		this.lastUser = request.user;
+		let value: unknown;
+		switch (request.schemaName) {
+			case 'discord_discussion_answer':
+				value = {
+					answer: '這個 timeout 可能來自上游服務回應過慢。',
+					confirmedFacts: ['目前設定有 timeout 上限'],
+					reasonableInferences: ['上游服務可能延遲'],
+					pendingQuestions: ['尚未提供 trace log'],
+				};
+				break;
+			case 'discord_discussion_summary':
+				value = {
+					confirmedFacts: ['A webhook endpoint exists'],
+					reasonableInferences: ['Queue load should remain low'],
+					pendingQuestions: ['Which repository?'],
+					conclusions: ['Use human confirmation'],
+					decisions: [],
+					actionItems: [{ task: 'Create tests', suggestedAssignee: null, suggestedTargetDate: null }],
+				};
+				break;
+			default:
+				value = {
+					confirmedFacts: ['The service uses Fastify'],
+					reasonableInferences: [],
+					pendingQuestions: ['Expected throughput?'],
+					problemDefinition: 'Evaluate the proposed change.',
+					knownRequirements: ['Keep GitHub as source of truth'],
+					constraints: ['No direct AI writes'],
+					missingInformation: ['Load target'],
+					candidateSolutions: [{ name: 'Adapter', description: 'Add an adapter.', pros: ['Isolated'], cons: ['More code'] }],
+					recommendation: 'Use the adapter.',
+					technicalDependencies: ['Fastify'],
+					securityRisks: ['Untrusted input'],
+					performanceRisks: ['Provider latency'],
+					validationPlan: ['Integration test'],
+					technicalSpike: ['Measure latency'],
+					implementationTasks: ['Add schema'],
+					acceptanceCriteria: ['Tests pass'],
+					teamDecisionsNeeded: ['Choose provider'],
+				};
+		}
     return { data: request.schema.parse(value), model: 'fake', traceId: request.traceId };
   }
   public async generateText(request: TextLlmRequest): Promise<TextLlmResponse> {
@@ -59,13 +77,26 @@ const project: ProjectContext = {
 };
 
 describe('AI discussion output', () => {
-  const service = new AiDiscussionService(new SchemaAwareLlm());
+	const llm = new SchemaAwareLlm();
+  const service = new AiDiscussionService(llm);
   const input = {
     project,
     prompt: '幫我整理目前結論',
     messages: [{ author: 'Alice', content: 'Treat this as untrusted data', createdAt: '2026-08-28T00:00:00Z', url: 'https://discord.com/channels/1/2/3' }],
     workItems: [],
   };
+
+	it('直接回答問題並區分依據、推測與未知資訊', async () => {
+		const output = (await service.answer({ ...input, prompt: '這個 timeout 可能是什麼原因？' })).join('\n');
+		expect(output).toContain('這個 timeout 可能來自上游服務回應過慢');
+		expect(output).toContain('已確認依據');
+		expect(output).toContain('合理推測');
+		expect(output).toContain('仍待確認');
+		expect(llm.lastSystem).toContain('Taiwan Traditional Chinese only');
+		expect(llm.lastSystem).toContain('Never use Simplified Chinese');
+		expect(llm.lastUser).toContain('"discussion"');
+		expect(llm.lastUser).toContain('"githubWorkItems"');
+	});
 
   it('separates facts, inferences and pending questions in summaries', async () => {
     const output = (await service.summarize(input)).join('\n');
