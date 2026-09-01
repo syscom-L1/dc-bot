@@ -36,6 +36,24 @@ export class DiscordRestAdapter implements DiscordAdapter {
     return response.id;
   }
 
+	public async replyToMessage(channelId: string, messageId: string, content: string): Promise<string> {
+		const response = idResponseSchema.parse(await this.rest.post(Routes.channelMessages(channelId), {
+			body: {
+				content,
+				message_reference: { message_id: messageId, channel_id: channelId },
+				allowed_mentions: { parse: [], replied_user: false },
+			},
+		}));
+		return response.id;
+	}
+
+	public async findRecentChannelMessageByMarker(channelId: string, marker: string): Promise<string | null> {
+		const messages = threadMessagesSchema.parse(await this.rest.get(Routes.channelMessages(channelId), {
+			query: new URLSearchParams({ limit: '50' }),
+		}));
+		return messages.find((message) => message.author.bot && message.content.includes(marker))?.id ?? null;
+	}
+
   public async sendDirectMessage(
     userId: string,
     content: string,

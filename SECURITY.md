@@ -18,6 +18,8 @@ Discord 訊息、Thread、GitHub Webhook／Issue／PR、Google 文件與 Monitor
 - `.env`、build output 與本機秘密被 Git ignore；Docker image 不內嵌 production secret。
 - GitHub／Google／Monitoring 寫入、管理綁定與請假狀態改變產生 Audit Log，包含 actor、resource、request ID 與去敏 before／after。
 - Process 支援 SIGINT／SIGTERM graceful shutdown；所有 provider 呼叫有明確錯誤邊界，queue job 使用有限 retry。
+- 成員新聞連結只接受 HTTPS；每次 DNS 與 redirect 都拒絕 localhost、私有、link-local、保留位址、URL credentials 與非標準連接埠，並限制 timeout、redirect、HTML 大小與 LLM 文字長度。
+- 新聞頁面內容一律視為不可信資料；LLM 只能回傳程式提供的候選 ID，原始網址、發布時間與來源由程式控制。資料庫不保存完整文章內容。
 
 ## 最小權限
 
@@ -41,4 +43,4 @@ Production 應在反向代理加 TLS、request rate limit、來源網路限制�
 
 ## Privacy
 
-請假只保存已綁定人員、開始／結束時間與通知狀態，不保存文字中的原因或假別。Audit before／after 僅保存完成追蹤所需欄位。外部內容不應長期複製到 PostgreSQL；Webhook payload 只在 queue job 期間存在。
+請假只保存已綁定人員、開始／結束時間與通知狀態，不保存文字中的原因或假別。Audit before／after 僅保存完成追蹤所需欄位。外部內容不應長期複製到 PostgreSQL；Webhook payload 只在 queue job 期間存在。AI 新聞只保存公開 URL、URL hash、短摘要、證據連結與處理狀態，不保存完整文章。

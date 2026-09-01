@@ -15,6 +15,8 @@ export const queueNames = [
   'google-document-update',
   'monitoring-alert',
   'calendar-notification',
+  'ai-news-digest',
+  'ai-news-link-summary',
   'dead-letter',
 ] as const;
 

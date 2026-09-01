@@ -52,6 +52,7 @@ Monitoring firing／resolved 必須使用相同 `source`、`fingerprint`、`envi
 - Progress reminder：`REMINDER_CRON`。
 - GitHub reconciliation：`GITHUB_RECONCILIATION_CRON`。
 - Calendar upcoming reminder：啟用 Google Calendar 時每五分鐘執行。
+- AI news digest：`AI_NEWS_CRON`，預設週一至週五 09:00；週末不建立正式發布工作。
 
 所有 cron 使用 `TIMEZONE`，production 預設 `Asia/Taipei`。收不到通知時確認 Scheduler 與 Worker 同時在線、repeatable job 存在、Project／Channel 綁定與 Discord 權限。
 
@@ -77,6 +78,14 @@ Monitoring firing／resolved 必須使用相同 `source`、`fingerprint`、`envi
 - Timeout／5xx：查看 trace ID、model 與 retry log，不記錄 prompt 全文或 key。
 - Schema failure：確認 endpoint 支援 OpenAI-compatible JSON response，必要時切換 `CUBI_LLM_FALLBACK_MODEL`。
 - LLM 不可用時，AI draft／討論／Docs proposal 失敗，但 GitHub webhook、既有排程與 health process 可分開運作。
+
+### AI 新聞
+
+- 早報逾時或缺漏：用 trace ID 檢查各來源 Adapter；單一來源失敗會降級，全部來源失敗才讓工作重試。
+- 正式早報以 Guild 與台北日期唯一鍵去重；Discord 訊息另含發布 marker，資料庫補登失敗時會搜尋 marker，不應手動刪除資料列後重跑。
+- `ai-news-digest` 用完重試次數後會進 `dead-letter`；若設定 `DISCORD_ADMIN_CHANNEL_ID`，會同步通知管理頻道。
+- `ai-news-link-summary` 使用 Discord message ID 作 job ID；同一網址可重用七天內摘要，但仍會回覆新的分享者。
+- 外部來源改版時先更新單一 Adapter 與 fixture，不要關閉 SSRF、大小或 timeout 限制來繞過錯誤。
 
 ### Google Workspace
 

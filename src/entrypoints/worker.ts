@@ -14,6 +14,11 @@ import { MonitoringAlertService, PrismaAlertStore } from '../monitoring/alert-se
 import { DiscordMonitoringAdapter } from '../monitoring/discord-adapter.js';
 import { MonitoringAlertProcessor } from '../monitoring/webhook-service.js';
 import { WorkerSystem } from '../queues/workers.js';
+import { AiNewsDigestService } from '../ai-news/digest-service.js';
+import { AiNewsLinkSummaryService } from '../ai-news/link-summary-service.js';
+import { AiNewsLlmService } from '../ai-news/llm-service.js';
+import { SafeUrlFetcher } from '../ai-news/safe-url-fetcher.js';
+import { createDefaultNewsSources } from '../ai-news/sources.js';
 
 const config = loadConfig();
 const llmConfig = loadLlmConfig();
@@ -26,6 +31,7 @@ if (!services.reminders || !services.weeklySummary || !services.reconciliation |
   || !infrastructure.github || !infrastructure.discord) {
   throw new Error('Worker requires both GITHUB_ENABLED=true and DISCORD_ENABLED=true');
 }
+const discord = infrastructure.discord;
 if (!llmConfig.enabled) throw new Error('Worker requires the CUBI LLM configuration');
 const llm = new OpenAiCompatibleLlmAdapter(llmConfig, logger);
 const riskRules = {
@@ -62,6 +68,35 @@ const monitoring = monitoringConfig.enabled
       ),
     )
   : undefined;
+const aiNewsLlm = new AiNewsLlmService(llm);
+const aiNews = config.aiNews.enabled
+	? {
+		digest: new AiNewsDigestService(
+			infrastructure.database,
+			discord,
+			createDefaultNewsSources(config.aiNews.primarySourceUrl, config.aiNews.majorOutageMinutes),
+			aiNewsLlm,
+			{
+				timezone: config.timezone,
+				initialLookbackHours: config.aiNews.initialLookbackHours,
+				maxLookbackHours: config.aiNews.maxLookbackHours,
+			},
+			logger,
+		),
+		linkSummary: new AiNewsLinkSummaryService(
+			infrastructure.database,
+			discord,
+			new SafeUrlFetcher(),
+			aiNewsLlm,
+			logger,
+		),
+		...(config.discord.adminChannelId ? {
+			notifyFailure: async (message: string) => {
+				await discord.sendChannelMessage(config.discord.adminChannelId, message);
+			},
+		} : {}),
+	}
+	: undefined;
 if (monitoringConfig.enabled && !config.discord.alertChannelId) {
   throw new Error('DISCORD_ALERT_CHANNEL_ID is required when monitoring is enabled');
 }
@@ -76,6 +111,7 @@ const workers = new WorkerSystem(
   services.leaves,
   calendar,
   monitoring,
+  aiNews,
   logger,
 );
 workers.start();
