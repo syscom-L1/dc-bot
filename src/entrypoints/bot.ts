@@ -56,6 +56,7 @@ const handler = new DiscordInteractionHandler(
   infrastructure.queues,
   logger,
   config.timezone,
+	config.github.commitHistoryEnabled,
 );
 const llm = new OpenAiCompatibleLlmAdapter(llmConfig, logger);
 const issueProposals = new PrismaIssueProposalStore(infrastructure.database.client);

@@ -39,6 +39,7 @@ const envSchema = z.object({
   GITHUB_ORGANIZATION: z.string().default(''),
   GITHUB_PROJECT_ID: z.string().default(''),
   GITHUB_INSTALLATION_ID: z.string().default(''),
+	GITHUB_COMMIT_HISTORY_ENABLED: booleanFromString,
 
   DAILY_REPORT_REMINDER_CRON: z.string().default('30 16 * * 1-5'),
   DAILY_SUMMARY_CRON: z.string().default('0 17 * * 1-5'),
@@ -80,6 +81,7 @@ export interface AppConfig {
     organization: string;
     projectId: string;
     installationId: string;
+		commitHistoryEnabled: boolean;
   };
   schedules: {
     dailyReportReminder: string;
@@ -154,6 +156,7 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
       organization: env.GITHUB_ORGANIZATION,
       projectId: env.GITHUB_PROJECT_ID,
       installationId: env.GITHUB_INSTALLATION_ID,
+			commitHistoryEnabled: env.GITHUB_COMMIT_HISTORY_ENABLED,
     },
     schedules: {
       dailyReportReminder: env.DAILY_REPORT_REMINDER_CRON,

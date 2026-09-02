@@ -59,6 +59,7 @@ export class DiscordInteractionHandler {
     private readonly queues: QueueAdapter,
     private readonly logger: Logger,
     private readonly timezone: string,
+		private readonly commitHistoryEnabled = false,
   ) {}
 
   public register(client: Client): void {
@@ -672,6 +673,14 @@ export class DiscordInteractionHandler {
           && candidate.name.toLowerCase() === repository.name.toLowerCase()
         ));
         lines.push(`${found ? '✅' : '❌'} Repository：${repository.owner}/${repository.name}${found ? '' : '（App 無權限）'}`);
+				if (found && this.commitHistoryEnabled) {
+					try {
+						await this.github.checkCommitAccess(installationId, repository.owner, repository.name);
+						lines.push(`✅ Commit history：${repository.owner}/${repository.name}`);
+					} catch (error) {
+						lines.push(discordErrorMessage(error, `Commit history 無法讀取 ${repository.owner}/${repository.name}，請確認 Contents: Read-only 權限。`));
+					}
+				}
       } catch (error) {
         lines.push(discordErrorMessage(error, `無法檢查 ${repository.owner}/${repository.name}。`));
       }

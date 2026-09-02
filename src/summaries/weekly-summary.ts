@@ -2,6 +2,11 @@ import type { DiscordAdapter, GitHubAdapter } from '../domain/adapters.js';
 import type { ProjectContext, WorkItem } from '../domain/models.js';
 import type { ProjectBindingStore } from '../persistence/contracts.js';
 import { splitDiscordMessage } from './daily-summary.js';
+import {
+	renderCommitHistorySummary,
+	weeklyCommitWindow,
+	type CommitHistorySummaryService,
+} from './commit-history-summary.js';
 
 const taipeiOffsetMs = 8 * 60 * 60 * 1_000;
 
@@ -86,6 +91,7 @@ export class WeeklySummaryService {
     private readonly github: GitHubAdapter,
     private readonly discord: DiscordAdapter,
     private readonly inactivityHours: number,
+		private readonly commitHistory?: CommitHistorySummaryService,
   ) {}
 
   public async run(now = new Date()): Promise<number> {
@@ -97,6 +103,13 @@ export class WeeklySummaryService {
         await this.discord.sendChannelMessage(project.summaryChannelId, content);
         sent += 1;
       }
+			if (this.commitHistory) {
+				const commitSummary = await this.commitHistory.summarize(project, weeklyCommitWindow(now));
+				for (const content of renderCommitHistorySummary(commitSummary)) {
+					await this.discord.sendChannelMessage(project.summaryChannelId, content);
+					sent += 1;
+				}
+			}
     }
     return sent;
   }

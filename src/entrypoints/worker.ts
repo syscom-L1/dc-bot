@@ -14,6 +14,7 @@ import { MonitoringAlertService, PrismaAlertStore } from '../monitoring/alert-se
 import { DiscordMonitoringAdapter } from '../monitoring/discord-adapter.js';
 import { MonitoringAlertProcessor } from '../monitoring/webhook-service.js';
 import { WorkerSystem } from '../queues/workers.js';
+import { CommitHistorySummaryService } from '../summaries/commit-history-summary.js';
 
 const config = loadConfig();
 const llmConfig = loadLlmConfig();
@@ -21,13 +22,18 @@ const googleConfig = loadGoogleConfig();
 const monitoringConfig = loadMonitoringConfig();
 const logger = createLogger(config.logLevel);
 const infrastructure = createInfrastructure(config);
-const services = createVerticalSlice(config, logger, infrastructure);
-if (!services.reminders || !services.weeklySummary || !services.reconciliation || !services.leaves
-  || !infrastructure.github || !infrastructure.discord) {
+if (!infrastructure.github || !infrastructure.discord) {
   throw new Error('Worker requires both GITHUB_ENABLED=true and DISCORD_ENABLED=true');
 }
 if (!llmConfig.enabled) throw new Error('Worker requires the CUBI LLM configuration');
 const llm = new OpenAiCompatibleLlmAdapter(llmConfig, logger);
+const commitHistory = config.github.commitHistoryEnabled
+	? new CommitHistorySummaryService(infrastructure.github, llm, logger)
+	: undefined;
+const services = createVerticalSlice(config, logger, infrastructure, commitHistory);
+if (!services.reminders || !services.weeklySummary || !services.reconciliation || !services.leaves) {
+	throw new Error('Worker GitHub and Discord services are unavailable');
+}
 const riskRules = {
   dueSoonDays: config.rules.dueSoonDays,
   inactivityHours: config.rules.inactivityHours,
@@ -35,11 +41,11 @@ const riskRules = {
 };
 const dailyReportReminder = new DailyReportReminderService(
   infrastructure.database, infrastructure.database, infrastructure.database,
-  infrastructure.github, infrastructure.discord, config.timezone, riskRules, logger,
+  infrastructure.github, infrastructure.discord, config.timezone, riskRules, logger, commitHistory,
 );
 const dailyReportSummary = new DailyReportSummaryService(
   infrastructure.database, infrastructure.database, infrastructure.github,
-  infrastructure.discord, llm, config.timezone, riskRules,
+  infrastructure.discord, llm, config.timezone, riskRules, commitHistory,
 );
 await infrastructure.queues.checkConnection();
 const calendar = googleConfig.enabled && googleConfig.calendarId && infrastructure.discord

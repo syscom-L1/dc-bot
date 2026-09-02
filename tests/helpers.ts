@@ -32,6 +32,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       organization: 'acme',
       projectId: '',
       installationId: '',
+			commitHistoryEnabled: false,
     },
     schedules: {
       dailyReportReminder: '30 16 * * 1-5',

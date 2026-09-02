@@ -1,7 +1,14 @@
-import type { WorkItem, ProjectContext, ProgressUpdateAction } from './models.js';
+import type {
+	CommitHistoryResult,
+	CommitHistoryWindow,
+	WorkItem,
+	ProjectContext,
+	ProgressUpdateAction,
+} from './models.js';
 
 export interface GitHubAdapter {
   listWorkItems(context: ProjectContext): Promise<WorkItem[]>;
+	listCommitActivities(context: ProjectContext, window: CommitHistoryWindow): Promise<CommitHistoryResult>;
   applyProgressUpdate(action: ProgressUpdateAction): Promise<{
     commentUrl: string;
     projectStatusUpdated: boolean;
@@ -28,6 +35,7 @@ export interface GitHubSetupAdapter {
   listInstallations(): Promise<GitHubInstallationChoice[]>;
   listInstallationRepositories(installationId: string): Promise<GitHubRepositoryChoice[]>;
   checkConnection(installationId?: string): Promise<void>;
+	checkCommitAccess(installationId: string, owner: string, repository: string): Promise<void>;
 }
 
 export interface DiscordButton {
