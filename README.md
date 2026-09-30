@@ -106,6 +106,7 @@ corepack pnpm@10.18.3 commands:register
 
 1. 16:30 在每個專案的摘要頻道發布提醒，標註已用 `/bot user-link` 綁定的成員。
 2. Bot 建立當日工作回報 Thread，並先貼出 GitHub Issue、PR、CI 自動快照。
+   啟用 Commit History 後，也會依 Repository 整理當日程式碼變更主題與代表性 commit 連結。
 3. 成員只需補充 GitHub 看不到的完成事項、阻塞與下一步，不必重抄 Issue。
 4. 17:00 讀取 Thread 回覆與即時 GitHub 狀態，透過 LLM 產生繁體中文摘要。
 5. 未回報者只顯示人數，不公開點名、不排名、不評分。
@@ -151,6 +152,7 @@ Discord 權限只需 View Channel、Send Messages 與 Read Message History，不
 不要使用共用 PAT。最小權限：
 
 - Repository metadata：Read-only
+- Contents：Read-only（啟用 Commit History 時必要）
 - Issues：Read and write
 - Pull requests：Read-only
 - Actions：Read-only
@@ -171,6 +173,25 @@ Webhook URL 是 `https://YOUR_HOST/webhooks/github`。Webhook secret 必須與 `
 | Iteration | `Iteration` |
 
 預設 Status options 是 `Backlog`、`Ready`、`In Progress`、`Review`、`Blocked`、`Done`。Mapping 保存在 `project_bindings.config_json`；欄位或 option 不存在時會明確失敗，不會自行建立或猜測。未綁 Project V2 時仍可讀綁定 Repository 的 Issue／PR，但沒有 Project Target Date。
+
+### Commit History 摘要（可選）
+
+GitHub App 的 Repository permissions 加入 `Contents: Read-only`，並由 Organization owner 核准更新後，設定：
+
+```env
+GITHUB_COMMIT_HISTORY_ENABLED=true
+```
+
+預設為 `false`，未啟用時不改變既有每日與每週摘要。啟用後，16:30 Thread、17:00 最終摘要與週五每週摘要會即時查詢各專案綁定 Repository 的全部分支：
+
+- 每日範圍：Asia/Taipei 當日 00:00 至摘要執行時間。
+- 每週範圍：Asia/Taipei 週一 00:00 至週五摘要執行時間。
+- 排除 merge commit 與 GitHub Bot commit，不收集 Email、不輸出作者排行，也不以 commit 數量評分。
+- 每個分支最多讀取 100 筆、每個 Repository 最多納入 100 筆、每個專案最多納入 200 筆；超過上限會標註資料不完整。
+- 摘要只列 Repository 層級的變更主題，每項附 1–3 個經程式驗證的代表性 commit 連結，不會列出完整 commit 清單。
+- 單一 Repository／分支失敗時仍保留其他資料；遇到 GitHub rate limit 後會停止該 Installation 的後續查詢，Issue／PR／CI 與 Discord 摘要仍會保留。
+
+啟用後可執行 `/bot setup` 的健康檢查，確認每個已綁定 Repository 都能讀取 commit。若顯示 `Contents: Read-only` 不足，請先確認 GitHub App 權限變更已由 Organization owner 核准，並重新安裝或更新該 Installation。若顯示 rate limit，請等待 GitHub 額度重置後重試，並檢查同一 Installation 是否綁定過多 Repository 或在短時間重複執行測試摘要。
 
 ## LLM 設定與安全邊界
 

@@ -7,6 +7,14 @@ import type { WorkItem } from '../domain/models.js';
 import type { RiskRules } from '../github/rules.js';
 import type { DailyReportStore, PersonStore, ProjectBindingStore } from '../persistence/contracts.js';
 import { renderDailySummary, splitDiscordMessage } from '../summaries/daily-summary.js';
+import {
+	commitSummaryContext,
+	currentDailyCommitWindow,
+	dailyCommitWindow,
+	renderCommitHistorySummary,
+	type CommitHistorySummary,
+	type CommitHistorySummaryService,
+} from '../summaries/commit-history-summary.js';
 
 export interface DailyReportResponse {
   messageId: string;
@@ -140,6 +148,7 @@ export class DailyReportReminderService {
     private readonly timezone: string,
     private readonly rules: RiskRules,
     private readonly logger: Logger,
+		private readonly commitHistory?: CommitHistorySummaryService,
   ) {}
 
   public async run(now = new Date(), projectBindingId?: string): Promise<number> {
@@ -204,6 +213,12 @@ Bot 會自動加入 GitHub Issue、PR 與 CI 狀態，不需要重複抄寫。\n
           '⚠️ GitHub 自動預覽暫時無法取得；仍可先填寫人工進度，17:00 會再次嘗試。',
         );
       }
+			if (this.commitHistory) {
+				const commitSummary = await this.commitHistory.summarize(project, currentDailyCommitWindow(now));
+				for (const message of renderCommitHistorySummary(commitSummary)) {
+					await this.discord.sendChannelMessage(created.threadId, message);
+				}
+			}
     }
     return opened;
   }
@@ -218,6 +233,7 @@ export class DailyReportSummaryService {
     private readonly llm: LlmAdapter,
     private readonly timezone: string,
     private readonly rules: RiskRules,
+		private readonly commitHistory?: CommitHistorySummaryService,
   ) {}
 
   public async run(now = new Date(), projectBindingId?: string): Promise<number> {
@@ -234,6 +250,9 @@ export class DailyReportSummaryService {
 
       const responses = safeResponses(await listThreadMessages(session.discordThreadId));
       const workItems = await this.github.listWorkItems(project);
+			const commitSummary: CommitHistorySummary | null = this.commitHistory
+				? await this.commitHistory.summarize(project, dailyCommitWindow(session.reportDate, now))
+				: null;
       const response = await this.llm.generateStructured<DailyReportSummary>({
         traceId: randomUUID(),
         schemaName: 'discord_daily_report_summary',
@@ -250,6 +269,7 @@ Put missing or conflicting information in unknowns. Return concise structured JS
           project: project.name,
           humanResponses: responses,
           githubWorkItems: compactWorkItems(workItems),
+					githubCommitSummary: commitSummary ? commitSummaryContext(commitSummary) : null,
         }),
         maxOutputTokens: 3_000,
       });
@@ -263,6 +283,7 @@ Put missing or conflicting information in unknowns. Return concise structured JS
           reportedCount: session.expectedDiscordUserIds.filter((id) => reportedUserIds.has(id)).length,
           summary: response.data,
         }),
+				...(commitSummary ? renderCommitHistorySummary(commitSummary) : []),
         ...renderDailySummary(project, workItems, now, this.timezone, this.rules),
       ];
       const summaryMessageIds: string[] = [];

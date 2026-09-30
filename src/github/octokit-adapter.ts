@@ -8,6 +8,12 @@ import type {
   GitHubSetupAdapter,
 } from '../domain/adapters.js';
 import type { ProgressUpdateAction, ProjectContext, WorkItem } from '../domain/models.js';
+import type { CommitHistoryResult, CommitHistoryWindow } from '../domain/models.js';
+import {
+	collectCommitActivities,
+	isEmptyRepositoryError,
+	type GitHubCommitClient,
+} from './commit-history.js';
 import { enrichGitHubSignals } from './enrich-signals.js';
 
 const fieldValueSchema = z.object({
@@ -298,6 +304,67 @@ export class OctokitGitHubAdapter implements GitHubAdapter, GitHubSetupAdapter {
     }
     return workItems;
   }
+
+	private async commitClient(installationId: string): Promise<GitHubCommitClient> {
+		const octokit = await this.installationOctokit(installationId);
+		return {
+			listBranches: async (owner, repository) => {
+				try {
+					const branches = await octokit.paginate(octokit.rest.repos.listBranches, {
+						owner,
+						repo: repository,
+						per_page: 100,
+					});
+					return branches.map((branch) => branch.name);
+				} catch (error) {
+					if (isEmptyRepositoryError(error)) return [];
+					throw error;
+				}
+			},
+			listCommits: async (input) => {
+				const response = await octokit.rest.repos.listCommits({
+					owner: input.owner,
+					repo: input.repository,
+					sha: input.branch,
+					since: input.window.since.toISOString(),
+					until: input.window.until.toISOString(),
+					per_page: input.limit,
+				});
+				return response.data.map((commit) => ({
+					sha: commit.sha,
+					url: commit.html_url,
+					message: commit.commit.message,
+					committedAt: commit.commit.committer?.date ?? commit.commit.author?.date ?? null,
+					parentCount: commit.parents.length,
+					authorLogin: commit.author?.login ?? null,
+					authorType: commit.author?.type ?? null,
+					committerLogin: commit.committer?.login ?? null,
+					committerType: commit.committer?.type ?? null,
+				}));
+			},
+		};
+	}
+
+	public async listCommitActivities(
+		context: ProjectContext,
+		window: CommitHistoryWindow,
+	): Promise<CommitHistoryResult> {
+		return collectCommitActivities({
+			context,
+			window,
+			getClient: async (installationId) => this.commitClient(installationId),
+		});
+	}
+
+	public async checkCommitAccess(installationId: string, owner: string, repository: string): Promise<void> {
+		const octokit = await this.installationOctokit(installationId);
+		try {
+			await octokit.rest.repos.listCommits({ owner, repo: repository, per_page: 1 });
+		} catch (error) {
+			if (isEmptyRepositoryError(error)) return;
+			throw error;
+		}
+	}
 
   public async applyProgressUpdate(action: ProgressUpdateAction): Promise<{
     commentUrl: string;

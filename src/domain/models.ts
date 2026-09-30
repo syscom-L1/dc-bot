@@ -71,6 +71,32 @@ export interface WorkItem {
   workflowState?: 'success' | 'failure' | 'pending' | 'unknown';
 }
 
+export interface CommitActivity {
+	owner: string;
+	repository: string;
+	sha: string;
+	url: string;
+	message: string;
+	committedAt: Date;
+	branches: string[];
+}
+
+export interface CommitHistoryWarning {
+	repository: string;
+	reason: 'branch_list_failed' | 'branch_query_failed' | 'rate_limited' | 'truncated';
+}
+
+export interface CommitHistoryResult {
+	commits: CommitActivity[];
+	warnings: CommitHistoryWarning[];
+	truncated: boolean;
+}
+
+export interface CommitHistoryWindow {
+	since: Date;
+	until: Date;
+}
+
 export const progressUpdateActionSchema = z.object({
   proposalId: z.string().uuid(),
   installationId: z.string().min(1),

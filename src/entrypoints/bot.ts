@@ -57,6 +57,7 @@ const handler = new DiscordInteractionHandler(
   infrastructure.queues,
   logger,
   config.timezone,
+	config.github.commitHistoryEnabled,
   { store: infrastructure.database, enabled: config.aiNews.enabled },
 );
 const llm = new OpenAiCompatibleLlmAdapter(llmConfig, logger);

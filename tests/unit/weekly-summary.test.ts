@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { projectBindingConfigSchema, type ProjectContext, type WorkItem } from '../../src/domain/models.js';
-import { renderWeeklySummary } from '../../src/summaries/weekly-summary.js';
+import type { DiscordAdapter, GitHubAdapter } from '../../src/domain/adapters.js';
+import type { ProjectBindingStore } from '../../src/persistence/contracts.js';
+import type { CommitHistorySummaryService } from '../../src/summaries/commit-history-summary.js';
+import { renderWeeklySummary, WeeklySummaryService } from '../../src/summaries/weekly-summary.js';
 
 const project: ProjectContext = {
   bindingId: 'binding',
@@ -39,4 +42,33 @@ describe('weekly summary', () => {
     expect(output).not.toContain('Commit 數量');
     expect(output).not.toContain('排行榜');
   });
+
+	it('appends the AI commit summary to the weekly report', async () => {
+		const sent: string[] = [];
+		const discord = {
+			sendChannelMessage: vi.fn(async (_channelId: string, content: string) => {
+				sent.push(content);
+				return `message-${sent.length}`;
+			}),
+		} as unknown as DiscordAdapter;
+		const commitHistory = {
+			summarize: vi.fn().mockResolvedValue({
+				status: 'complete', overview: '完成 API 調整。', warnings: [],
+				repositories: [{ repository: 'acme/api', changes: [{
+					summary: '調整 API', sources: [{ sha: 'abcdef123', url: 'https://github.com/acme/api/commit/abcdef123' }],
+				}] }],
+			}),
+		} as unknown as CommitHistorySummaryService;
+		const service = new WeeklySummaryService(
+			{ listActive: vi.fn().mockResolvedValue([{ ...project, summaryChannelId: 'summary' }]) } as unknown as ProjectBindingStore,
+			{ listWorkItems: vi.fn().mockResolvedValue([]) } as unknown as GitHubAdapter,
+			discord,
+			48,
+			commitHistory,
+		);
+
+		await expect(service.run(new Date('2026-09-04T08:00:00.000Z'))).resolves.toBe(2);
+		expect(sent.join('\n')).toContain('程式碼變更摘要');
+		expect(sent.join('\n')).toContain('調整 API');
+	});
 });

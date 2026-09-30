@@ -11,6 +11,7 @@ import { ProgressProposalService, ProgressReminderService } from './reminders/re
 import { DailySummaryService } from './summaries/daily-summary.js';
 import { WeeklySummaryService } from './summaries/weekly-summary.js';
 import { LeaveService, PrismaLeaveStore } from './leave/leave-service.js';
+import type { CommitHistorySummaryService } from './summaries/commit-history-summary.js';
 
 export function createInfrastructure(config: AppConfig) {
   const database = new PrismaStore();
@@ -26,6 +27,7 @@ export function createVerticalSlice(
   config: AppConfig,
   logger: Logger,
   infrastructure: ReturnType<typeof createInfrastructure>,
+	commitHistory?: CommitHistorySummaryService,
 ) {
   const { database, queues, github, discord } = infrastructure;
   const webhooks = new GitHubWebhookService(database, queues);
@@ -45,7 +47,13 @@ export function createVerticalSlice(
     config.timezone,
     riskRules,
   );
-  const weeklySummary = new WeeklySummaryService(database, github, discord, config.rules.inactivityHours);
+  const weeklySummary = new WeeklySummaryService(
+		database,
+		github,
+		discord,
+		config.rules.inactivityHours,
+		commitHistory,
+	);
   const reminders = new ProgressReminderService(
     database,
     database,

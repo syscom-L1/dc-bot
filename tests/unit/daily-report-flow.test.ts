@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { LlmAdapter } from '../../src/ai/contracts.js';
+import type { LlmAdapter, StructuredLlmRequest } from '../../src/ai/contracts.js';
 import {
   DailyReportReminderService,
   DailyReportSummaryService,
@@ -8,6 +8,7 @@ import {
 import type { DiscordAdapter, GitHubAdapter } from '../../src/domain/adapters.js';
 import { repositoryInstallationId, type ProjectContext } from '../../src/domain/models.js';
 import type { DailyReportStore, PersonStore, ProjectBindingStore } from '../../src/persistence/contracts.js';
+import type { CommitHistorySummaryService } from '../../src/summaries/commit-history-summary.js';
 
 const project: ProjectContext = {
   bindingId: '671d5177-e303-425b-a7dd-80692540a8d9',
@@ -48,9 +49,10 @@ describe('daily report flow', () => {
       return { messageId: 'reminder-1', threadId: 'thread-1' };
     });
     const markOpened = vi.fn().mockResolvedValue(undefined);
+    const sendChannelMessage = vi.fn().mockResolvedValue('preview-1');
     const discord = {
       createThread,
-      sendChannelMessage: vi.fn().mockResolvedValue('preview-1'),
+      sendChannelMessage,
     } as unknown as DiscordAdapter;
     const reports = {
       getOrCreateDailyReport: vi.fn().mockResolvedValue({
@@ -61,7 +63,15 @@ describe('daily report flow', () => {
       }),
       markDailyReportOpened: markOpened,
     } as unknown as DailyReportStore;
-    const service = new DailyReportReminderService(
+    const commitHistory = {
+			summarize: vi.fn().mockResolvedValue({
+				status: 'complete', overview: 'API 已更新。', warnings: [],
+				repositories: [{ repository: 'powei-888/main', changes: [{
+					summary: '調整 API', sources: [{ sha: 'abcdef123', url: 'https://github.com/acme/api/commit/abcdef123' }],
+				}] }],
+			}),
+		} as unknown as CommitHistorySummaryService;
+		const service = new DailyReportReminderService(
       { listActive: vi.fn().mockResolvedValue([
           project,
           { ...project, bindingId: 'other-project', name: 'other', summaryChannelId: 'other-summary' },
@@ -78,6 +88,7 @@ describe('daily report flow', () => {
       'Asia/Taipei',
       rules,
       { warn: vi.fn() } as never,
+			commitHistory,
     );
 
     await expect(service.run(new Date('2026-08-28T08:30:00.000Z'), project.bindingId)).resolves.toBe(1);
@@ -89,6 +100,7 @@ describe('daily report flow', () => {
     }));
     expect(createThread.mock.calls[0]?.[0].content).toContain('<@user-1> <@user-2>');
     expect(markOpened).toHaveBeenCalledWith('session-1', 'reminder-1', 'thread-1', expect.any(Date));
+		expect(sendChannelMessage).toHaveBeenCalledWith('thread-1', expect.stringContaining('程式碼變更摘要'));
   });
 
   it('summarizes replies without publicly naming non-reporters', async () => {
@@ -113,19 +125,30 @@ describe('daily report flow', () => {
       }]),
       markDailyReportSummarized: markSummarized,
     } as unknown as DailyReportStore;
-    const llm = {
-      generateStructured: vi.fn().mockResolvedValue({
-        data: {
-          overview: 'API 開發持續進行。',
-          memberUpdates: [{
-            authorName: 'Alice', completed: ['完成 API'], inProgress: [], blockers: [], nextSteps: ['補測試'],
-          }],
-          blockers: [], nextActions: ['補齊測試'], unknowns: [],
-        },
-        model: 'test', traceId: 'trace',
-      }),
-    } as unknown as LlmAdapter;
-    const service = new DailyReportSummaryService(
+		let generatedUser = '';
+		const generateStructured = vi.fn(async (request: StructuredLlmRequest<unknown>) => {
+			generatedUser = request.user;
+			return {
+				data: {
+					overview: 'API 開發持續進行。',
+					memberUpdates: [{
+						authorName: 'Alice', completed: ['完成 API'], inProgress: [], blockers: [], nextSteps: ['補測試'],
+					}],
+					blockers: [], nextActions: ['補齊測試'], unknowns: [],
+				},
+				model: 'test', traceId: 'trace',
+			};
+		});
+		const llm = { generateStructured } as unknown as LlmAdapter;
+    const commitHistory = {
+			summarize: vi.fn().mockResolvedValue({
+				status: 'complete', overview: 'API 已更新。', warnings: [],
+				repositories: [{ repository: 'powei-888/main', changes: [{
+					summary: '調整 API', sources: [{ sha: 'abcdef123', url: 'https://github.com/acme/api/commit/abcdef123' }],
+				}] }],
+			}),
+		} as unknown as CommitHistorySummaryService;
+		const service = new DailyReportSummaryService(
       { findProjectById: vi.fn().mockResolvedValue(project) } as unknown as ProjectBindingStore,
       reports,
       { listWorkItems: vi.fn().mockResolvedValue([]) } as unknown as GitHubAdapter,
@@ -133,11 +156,14 @@ describe('daily report flow', () => {
       llm,
       'Asia/Taipei',
       rules,
+			commitHistory,
     );
 
     await expect(service.run(new Date('2026-08-28T09:00:00.000Z'))).resolves.toBe(1);
     expect(sent.join('\n')).toContain('回報狀態：1/2');
     expect(sent.join('\n')).toContain('未回報者僅計入數量，不公開點名');
+		expect(sent.join('\n')).toContain('程式碼變更摘要');
+		expect(generatedUser).toContain('githubCommitSummary');
     expect(markSummarized).toHaveBeenCalledWith(expect.objectContaining({
       id: 'session-1',
       responses: [expect.objectContaining({ authorId: 'user-1' })],
