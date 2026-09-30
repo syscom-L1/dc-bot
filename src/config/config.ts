@@ -10,6 +10,11 @@ const commaSeparated = z
   .default('')
   .transform((value) => value.split(',').map((item) => item.trim()).filter(Boolean));
 
+const publicHttpsUrl = z.string().url().refine((value) => {
+	const url = new URL(value);
+	return url.protocol === 'https:' && !url.username && !url.password && (!url.port || url.port === '443');
+}, 'must be an HTTPS URL without credentials or a non-standard port');
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   TIMEZONE: z.string().default('Asia/Taipei'),
@@ -29,6 +34,14 @@ const envSchema = z.object({
   DISCORD_SUMMARY_CHANNEL_ID: z.string().default(''),
   DISCORD_LEAVE_CHANNEL_ID: z.string().default(''),
   DISCORD_ALERT_CHANNEL_ID: z.string().default(''),
+
+  AI_NEWS_ENABLED: booleanFromString,
+  AI_NEWS_CRON: z.string().default('0 9 * * 1-5'),
+  AI_NEWS_PRIMARY_SOURCE_URL: publicHttpsUrl.default('https://news.smol.ai/rss.xml'),
+  AI_NEWS_INITIAL_LOOKBACK_HOURS: z.coerce.number().int().min(1).max(168).default(72),
+  AI_NEWS_MAX_LOOKBACK_HOURS: z.coerce.number().int().min(1).max(168).default(96),
+  AI_NEWS_MAJOR_OUTAGE_MINUTES: z.coerce.number().int().min(1).max(1_440).default(60),
+  AI_NEWS_MEMBER_MAX_LINKS: z.coerce.number().int().min(1).max(3).default(3),
 
   GITHUB_ENABLED: booleanFromString,
   GITHUB_APP_ID: z.string().default(''),
@@ -51,6 +64,14 @@ const envSchema = z.object({
   INACTIVITY_HOURS: z.coerce.number().int().min(1).max(720).default(48),
   REVIEW_WAIT_HOURS: z.coerce.number().int().min(1).max(720).default(24),
   AUTO_UPDATE_GITHUB_STATUS: booleanFromString,
+}).superRefine((env, context) => {
+	if (env.AI_NEWS_INITIAL_LOOKBACK_HOURS > env.AI_NEWS_MAX_LOOKBACK_HOURS) {
+		context.addIssue({
+			code: z.ZodIssueCode.custom,
+			path: ['AI_NEWS_INITIAL_LOOKBACK_HOURS'],
+			message: 'must not exceed AI_NEWS_MAX_LOOKBACK_HOURS',
+		});
+	}
 });
 
 export interface AppConfig {
@@ -83,6 +104,14 @@ export interface AppConfig {
     installationId: string;
 		commitHistoryEnabled: boolean;
   };
+  aiNews: {
+    enabled: boolean;
+    primarySourceUrl: string;
+    initialLookbackHours: number;
+    maxLookbackHours: number;
+    majorOutageMinutes: number;
+    memberMaxLinks: number;
+  };
   schedules: {
     dailyReportReminder: string;
     dailySummary: string;
@@ -90,6 +119,7 @@ export interface AppConfig {
     weeklySummary: string;
     reminder: string;
     githubReconciliation: string;
+    aiNews: string;
   };
   rules: {
     dueSoonDays: number;
@@ -158,6 +188,14 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
       installationId: env.GITHUB_INSTALLATION_ID,
 			commitHistoryEnabled: env.GITHUB_COMMIT_HISTORY_ENABLED,
     },
+    aiNews: {
+      enabled: env.AI_NEWS_ENABLED,
+      primarySourceUrl: env.AI_NEWS_PRIMARY_SOURCE_URL,
+      initialLookbackHours: env.AI_NEWS_INITIAL_LOOKBACK_HOURS,
+      maxLookbackHours: env.AI_NEWS_MAX_LOOKBACK_HOURS,
+      majorOutageMinutes: env.AI_NEWS_MAJOR_OUTAGE_MINUTES,
+      memberMaxLinks: env.AI_NEWS_MEMBER_MAX_LINKS,
+    },
     schedules: {
       dailyReportReminder: env.DAILY_REPORT_REMINDER_CRON,
       dailySummary: env.DAILY_SUMMARY_CRON,
@@ -165,6 +203,7 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
       weeklySummary: env.WEEKLY_SUMMARY_CRON,
       reminder: env.REMINDER_CRON,
       githubReconciliation: env.GITHUB_RECONCILIATION_CRON,
+      aiNews: env.AI_NEWS_CRON,
     },
     rules: {
       dueSoonDays: env.DUE_SOON_DAYS,

@@ -73,4 +73,18 @@ describe('Discord setup wizard', () => {
     expect(JSON.stringify(json)).toContain('setup:repo-page');
     expect(JSON.stringify(json)).toContain('下一頁');
   });
+
+	it('shows guild-level AI news setup and preview controls when enabled', () => {
+		const input = {
+			projects: [baseProject],
+			selectedProject: baseProject,
+			peopleCount: 1,
+			aiNewsAvailable: true,
+			aiNewsChannelId: 'ai-news-channel',
+		};
+		expect(setupWizardText(input)).toContain('<#ai-news-channel>');
+		const components = JSON.stringify(setupWizardRows(input).map((row) => row.toJSON()));
+		expect(components).toContain('setup:ai-news:root');
+		expect(components).toContain('setup:ai-news-preview:root');
+	});
 });

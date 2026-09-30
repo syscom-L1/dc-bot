@@ -163,3 +163,81 @@ export interface DatabaseHealth {
   checkConnection(): Promise<void>;
   close(): Promise<void>;
 }
+
+export interface AiNewsSettingRecord {
+	id: string;
+	discordGuildId: string;
+	discordChannelId: string;
+	enabled: boolean;
+}
+
+export interface AiNewsDigestRecord {
+	id: string;
+	settingId: string;
+	digestDate: string;
+	windowStart: Date;
+	windowEnd: Date;
+	status: 'PROCESSING' | 'PUBLISHED' | 'FAILED';
+	discordMessageId: string | null;
+}
+
+export interface AiNewsLinkSummaryRecord {
+	id: string;
+	canonicalUrl: string;
+	urlHash: string;
+	status: 'PROCESSING' | 'COMPLETED' | 'FAILED';
+	summary: unknown;
+	replyMessageId: string | null;
+}
+
+export interface AiNewsStore {
+	upsertAiNewsSetting(input: {
+		discordGuildId: string;
+		discordChannelId: string;
+		enabled: boolean;
+	}): Promise<AiNewsSettingRecord>;
+	findAiNewsSetting(discordGuildId: string): Promise<AiNewsSettingRecord | null>;
+	listEnabledAiNewsSettings(): Promise<AiNewsSettingRecord[]>;
+	claimAiNewsDigest(input: {
+		settingId: string;
+		digestDate: string;
+		windowStart: Date;
+		windowEnd: Date;
+		traceId: string;
+	}): Promise<AiNewsDigestRecord>;
+	findLastPublishedAiNewsDigestAt(settingId: string): Promise<Date | null>;
+	findRecentAiNewsUrlHashes(discordGuildId: string, since: Date): Promise<Set<string>>;
+	completeAiNewsDigest(input: {
+		digestId: string;
+		discordMessageId: string;
+		publishedAt: Date;
+		items: Array<{
+			rank: number;
+			category: string;
+			brand?: string;
+			title: string;
+			canonicalUrl: string;
+			urlHash: string;
+			provider: string;
+			evidence: object;
+			summary: object;
+		}>;
+	}): Promise<void>;
+	failAiNewsDigest(digestId: string, errorMessage: string): Promise<void>;
+	claimAiNewsLinkSummary(input: {
+		discordGuildId: string;
+		discordChannelId: string;
+		discordMessageId: string;
+		discordUserId: string;
+		canonicalUrl: string;
+		urlHash: string;
+	}): Promise<AiNewsLinkSummaryRecord>;
+	findRecentAiNewsLinkSummary(urlHash: string, since: Date): Promise<AiNewsLinkSummaryRecord | null>;
+	completeAiNewsLinkSummary(input: {
+		id: string;
+		summary: object;
+		replyMessageId: string;
+		completedAt: Date;
+	}): Promise<void>;
+	failAiNewsLinkSummary(id: string, errorMessage: string): Promise<void>;
+}

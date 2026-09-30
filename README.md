@@ -17,6 +17,7 @@
 - Google Calendar 每日行程與會前提醒，使用資料庫 unique key 防止重複通知。
 - 簽章 Monitoring webhook、`source + fingerprint + environment` 去重、Discord 告警更新、Critical thread、接手／靜音／恢復與 Audit Log。
 - `/health`、依賴感知 `/ready`、結構化日誌、秘密遮蔽與 graceful shutdown。
+- `#AI新聞` 平日 09:00 三則生成式 AI 早報，以及成員貼入最多三個 HTTPS 連結後的繁體中文摘要。
 
 ## 架構與 Process
 
@@ -84,6 +85,7 @@ corepack pnpm@10.18.3 commands:register
 5. 按「設定工作摘要」選擇 `#工作摘要`。
 6. 按「綁定團隊成員」。
 7. 畫面顯示 `4/4 完成` 後，依序按「測試 16:30 提醒」與「測試 17:00 彙整」。
+8. 先在 Discord 建立 `#AI新聞`，再按「設定 AI 新聞」選取該頻道，並用「測試今日新聞」驗收。
 
 設定精靈會自動選取目前頻道所屬專案；有多個專案時提供下拉選單。所有設定回覆皆為 ephemeral，不會洗版。健康檢查會驗證 GitHub App、每個 Repository，以及 Discord 頻道與 Thread 權限。
 
@@ -118,6 +120,26 @@ DAILY_REPORT_REMINDER_CRON=30 16 * * 1-5
 DAILY_SUMMARY_CRON=0 17 * * 1-5
 MORNING_NOTIFICATION_CRON=0 8 * * 1-5
 ```
+
+## AI 新聞頻道
+
+啟用 `AI_NEWS_ENABLED=true` 後，Scheduler 會依 `AI_NEWS_CRON` 在週一至週五台北時間 09:00 建立早報工作。週六、週日不自動發布；星期一會從上次成功早報後接續整理，首次啟用回溯 72 小時，失敗補跑最多回溯 96 小時。台灣國定假日第一版仍會發布。
+
+候選來源包含 AINews、OpenAI News／Status、Anthropic News／Claude Status、Hugging Face Blog／Status／Daily Papers／Trending Models、Hacker News 官方 API與 GitHub Trending。每期最多三則，涵蓋新模型、新技術、新用法、產品更新、安全、服務與產業事件；若不足三則可信內容，會明確標示而不湊數。
+
+成員可直接在 `#AI新聞` 貼一至三個 HTTPS 連結。Bot 會非同步回覆主要內容、分類、重要原因、可能用法與原始來源。週末仍可使用此功能。Bot 不會刪除、修改或審核成員訊息。
+
+```env
+AI_NEWS_ENABLED=false
+AI_NEWS_CRON=0 9 * * 1-5
+AI_NEWS_PRIMARY_SOURCE_URL=https://news.smol.ai/rss.xml
+AI_NEWS_INITIAL_LOOKBACK_HOURS=72
+AI_NEWS_MAX_LOOKBACK_HOURS=96
+AI_NEWS_MAJOR_OUTAGE_MINUTES=60
+AI_NEWS_MEMBER_MAX_LINKS=3
+```
+
+Discord 權限只需 View Channel、Send Messages 與 Read Message History，不需要 Manage Channels。`/bot setup` 的「測試今日新聞」不占正式發布紀錄。
 
 ## 多 GitHub App Installation Repository
 
@@ -218,7 +240,7 @@ corepack pnpm@10.18.3 build
 corepack pnpm@10.18.3 check
 ```
 
-測試涵蓋設定精靈完成度／下一步／Repo 多選分頁、簽章成功／失敗、Webhook 冪等、GitHub 風險與 Actions／review signals、權限、結構化 AI schema、訊息轉 Issue、人工確認、請假、每日／每週摘要、Docs revision／diff、Calendar 冪等與 Monitoring lifecycle。
+測試涵蓋設定精靈完成度／下一步／Repo 多選分頁、AI 新聞 URL 正規化／排序／SSRF 網段阻擋、簽章成功／失敗、Webhook 冪等、GitHub 風險與 Actions／review signals、權限、結構化 AI schema、訊息轉 Issue、人工確認、請假、每日／每週摘要、Docs revision／diff、Calendar 冪等與 Monitoring lifecycle。
 
 ## 疑難排解
 
@@ -229,5 +251,7 @@ corepack pnpm@10.18.3 check
 - Project 更新失敗：確認 App 權限、Project node ID、field mapping 與 Status option。
 - Discord 無指令：重跑 `commands:register`，檢查 Guild ID、scopes、intents 與 Role／Channel 白名單。
 - Google `403/404`：確認文件或 Calendar 已分享給 service account，且文件在 Project allowlist。
+- AI 新聞沒有發布：確認 `AI_NEWS_ENABLED=true`、Scheduler 與 Worker 在線、`/bot setup` 已綁定頻道，並檢查 `ai-news-digest`／`dead-letter` log。
+- 成員連結無法摘要：只接受公開 HTTPS 網址；localhost、私有／保留 IP、非 443 連接埠、過大頁面與過多重新導向都會拒絕。
 
 營運、資安與已知限制見 [OPERATIONS.md](./OPERATIONS.md)、[SECURITY.md](./SECURITY.md)、[ASSUMPTIONS.md](./ASSUMPTIONS.md)。

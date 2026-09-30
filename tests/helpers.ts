@@ -34,6 +34,14 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       installationId: '',
 			commitHistoryEnabled: false,
     },
+    aiNews: {
+      enabled: false,
+      primarySourceUrl: 'https://news.smol.ai/rss.xml',
+      initialLookbackHours: 72,
+      maxLookbackHours: 96,
+      majorOutageMinutes: 60,
+      memberMaxLinks: 3,
+    },
     schedules: {
       dailyReportReminder: '30 16 * * 1-5',
       dailySummary: '0 17 * * 1-5',
@@ -41,6 +49,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       weeklySummary: '0 16 * * 5',
       reminder: '0 10 * * 1-5',
       githubReconciliation: '15 */6 * * *',
+      aiNews: '0 9 * * 1-5',
     },
     rules: {
       dueSoonDays: 3,

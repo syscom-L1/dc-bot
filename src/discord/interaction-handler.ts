@@ -18,13 +18,14 @@ import type { Logger } from 'pino';
 import { ConflictError, discordErrorMessage, ForbiddenError, NotFoundError, ValidationError } from '../common/errors.js';
 import type { GitHubRepositoryChoice, GitHubSetupAdapter, QueueAdapter } from '../domain/adapters.js';
 import type { ProjectContext } from '../domain/models.js';
-import type { AuditStore, PersonStore, ProjectBindingStore } from '../persistence/contracts.js';
+import type { AiNewsStore, AuditStore, PersonStore, ProjectBindingStore } from '../persistence/contracts.js';
 import type { DocumentBindingStore } from '../google/document-service.js';
 import type { ProgressProposalService } from '../reminders/reminder-service.js';
 import type { DiscordAccessPolicy } from './access-policy.js';
 import { botHelpText, guildStatusText, setupGuidance, setupPanelRows, setupPanelText } from './help-content.js';
 import {
   installationPicker,
+  aiNewsChannelPicker,
   memberLoginModal,
   memberPicker,
   projectChannelPicker,
@@ -60,6 +61,7 @@ export class DiscordInteractionHandler {
     private readonly logger: Logger,
     private readonly timezone: string,
 		private readonly commitHistoryEnabled = false,
+    private readonly aiNews?: { store: AiNewsStore; enabled: boolean },
   ) {}
 
   public register(client: Client): void {
@@ -137,14 +139,21 @@ export class DiscordInteractionHandler {
   }
 
   private async setupPayload(guildId: string, channelId: string, selectedProjectId?: string) {
-    const [projects, people] = await Promise.all([
+    const [projects, people, aiNewsSetting] = await Promise.all([
       this.bindings.listByGuild(guildId),
       this.people.listEnabled(),
+      this.aiNews?.store.findAiNewsSetting(guildId),
     ]);
     const selectedProject = selectedProjectId && selectedProjectId !== 'root'
       ? projects.find((project) => project.bindingId === selectedProjectId)
       : projects.find((project) => project.discordChannelId === channelId) ?? (projects.length === 1 ? projects[0] : undefined);
-    const input = { projects, peopleCount: people.length, ...(selectedProject ? { selectedProject } : {}) };
+    const input = {
+			projects,
+			peopleCount: people.length,
+			...(selectedProject ? { selectedProject } : {}),
+			...(aiNewsSetting?.enabled ? { aiNewsChannelId: aiNewsSetting.discordChannelId } : {}),
+			aiNewsAvailable: this.aiNews?.enabled ?? false,
+		};
     return { content: setupWizardText(input), components: setupWizardRows(input) };
   }
 
@@ -392,6 +401,28 @@ export class DiscordInteractionHandler {
       });
       return;
     }
+		if (action === 'ai-news') {
+			if (!this.aiNews?.enabled) throw new ValidationError('AI 新聞功能尚未由系統管理員啟用。');
+			await interaction.reply({
+				content: '選擇團隊已建立的 #AI新聞。Bot 只會使用 View Channel、Send Messages 與 Read Message History。',
+				components: aiNewsChannelPicker(),
+				ephemeral: true,
+			});
+			return;
+		}
+		if (action === 'ai-news-preview') {
+			if (!this.aiNews?.enabled) throw new ValidationError('AI 新聞功能尚未由系統管理員啟用。');
+			const setting = await this.aiNews.store.findAiNewsSetting(guildId);
+			if (!setting?.enabled) throw new ValidationError('請先設定 #AI新聞。');
+			await this.queues.enqueue(
+				'ai-news-digest',
+				'preview',
+				{ guildId, preview: true, requestedBy: interaction.user.id },
+				{ jobId: `ai-news-preview-${interaction.id}`, attempts: 1 },
+			);
+			await interaction.reply({ content: `已開始整理測試早報，完成後會發布到 <#${setting.discordChannelId}>；這次不會占用正式發布紀錄。`, ephemeral: true });
+			return;
+		}
     if (action === 'repo-page') {
       const repositoryProjectId = parts[2] ?? 'root';
       const installationId = parts[3];
@@ -513,6 +544,31 @@ export class DiscordInteractionHandler {
     const guildId = this.requireGuild(interaction);
     this.requireAdmin(interaction);
     const channelId = selectedValue(interaction.values, '頻道');
+		if (interaction.customId === 'setup-ai-news-channel') {
+			if (!this.aiNews?.enabled) throw new ValidationError('AI 新聞功能尚未由系統管理員啟用。');
+			const before = await this.aiNews.store.findAiNewsSetting(guildId);
+			const setting = await this.aiNews.store.upsertAiNewsSetting({
+				discordGuildId: guildId,
+				discordChannelId: channelId,
+				enabled: true,
+			});
+			await this.audit.append({
+				actorType: 'discord_user',
+				actorId: interaction.user.id,
+				action: 'ai_news.channel.update',
+				resourceType: 'discord_guild',
+				resourceId: guildId,
+				...(before ? { before: { channelId: before.discordChannelId, enabled: before.enabled } } : {}),
+				after: { channelId: setting.discordChannelId, enabled: setting.enabled },
+				requestId: interaction.id,
+			});
+			const payload = await this.setupPayload(guildId, interaction.channelId ?? '');
+			await interaction.update({
+				content: `AI 新聞已設為 <#${channelId}>。平日 09:00 發布早報，週末仍可貼連結取得摘要。\n\n${payload.content}`,
+				components: payload.components,
+			});
+			return;
+		}
     if (interaction.customId === 'setup-project-channel') {
       await interaction.deferUpdate();
       const installations = await this.github.listInstallations();
@@ -692,6 +748,10 @@ export class DiscordInteractionHandler {
       ...(project.summaryChannelId ? [{ label: '工作摘要', id: project.summaryChannelId, thread: true }] : []),
       ...(project.leaveChannelId ? [{ label: '行程通知', id: project.leaveChannelId, thread: false }] : []),
     ];
+		const aiNewsSetting = await this.aiNews?.store.findAiNewsSetting(project.discordGuildId);
+		if (aiNewsSetting?.enabled) {
+			channelChecks.push({ label: 'AI 新聞', id: aiNewsSetting.discordChannelId, thread: false });
+		}
     for (const check of channelChecks) {
       const channel = await interaction.guild?.channels.fetch(check.id);
       const permissions = channel && botMember ? channel.permissionsFor(botMember) : null;

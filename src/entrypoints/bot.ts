@@ -22,6 +22,7 @@ import { GoogleWorkspaceAdapter } from '../google/adapters.js';
 import { GoogleDocumentProposalService, PrismaDocumentBindingStore, PrismaDocumentProposalStore } from '../google/document-service.js';
 import { MonitoringAlertService, PrismaAlertStore } from '../monitoring/alert-service.js';
 import { DiscordMonitoringAdapter } from '../monitoring/discord-adapter.js';
+import { DiscordAiNewsHandler } from '../discord/ai-news-handler.js';
 
 const config = loadConfig();
 const llmConfig = loadLlmConfig();
@@ -57,6 +58,7 @@ const handler = new DiscordInteractionHandler(
   logger,
   config.timezone,
 	config.github.commitHistoryEnabled,
+  { store: infrastructure.database, enabled: config.aiNews.enabled },
 );
 const llm = new OpenAiCompatibleLlmAdapter(llmConfig, logger);
 const issueProposals = new PrismaIssueProposalStore(infrastructure.database.client);
@@ -112,6 +114,15 @@ const monitoringHandler = monitoringConfig.enabled
       logger,
     )
   : undefined;
+const aiNewsHandler = config.aiNews.enabled
+	? new DiscordAiNewsHandler(
+		policy,
+		infrastructure.database,
+		infrastructure.queues,
+		config.aiNews.memberMaxLinks,
+		logger,
+	)
+	: undefined;
 if (monitoringConfig.enabled && !config.discord.alertChannelId) {
   throw new Error('DISCORD_ALERT_CHANNEL_ID is required when monitoring is enabled');
 }
@@ -121,5 +132,6 @@ aiDiscussionHandler.register(gateway.client);
 leaveHandler.register(gateway.client);
 documentHandler?.register(gateway.client);
 monitoringHandler?.register(gateway.client);
+aiNewsHandler?.register(gateway.client);
 installGracefulShutdown(logger, [gateway, infrastructure.queues, infrastructure.database]);
 await gateway.start();
