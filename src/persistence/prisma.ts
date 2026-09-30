@@ -11,6 +11,10 @@ import type { ProjectBindingConfig, ProjectContext } from '../domain/models.js';
 import { projectBindingConfigSchema } from '../domain/models.js';
 import type {
   AuditStore,
+  AiNewsDigestRecord,
+  AiNewsLinkSummaryRecord,
+  AiNewsSettingRecord,
+  AiNewsStore,
   DailyReportStore,
   DailyReportSessionRecord,
   DatabaseHealth,
@@ -96,6 +100,7 @@ export class PrismaStore
     ProposalStore,
     AuditStore,
     DailyReportStore,
+    AiNewsStore,
     DatabaseHealth
 {
   public readonly client: PrismaClient;
@@ -529,4 +534,225 @@ export class PrismaStore
       },
     });
   }
+
+	public async upsertAiNewsSetting(input: {
+		discordGuildId: string;
+		discordChannelId: string;
+		enabled: boolean;
+	}): Promise<AiNewsSettingRecord> {
+		return this.client.aiNewsSetting.upsert({
+			where: { discordGuildId: input.discordGuildId },
+			create: input,
+			update: { discordChannelId: input.discordChannelId, enabled: input.enabled },
+		});
+	}
+
+	public async findAiNewsSetting(discordGuildId: string): Promise<AiNewsSettingRecord | null> {
+		return this.client.aiNewsSetting.findUnique({ where: { discordGuildId } });
+	}
+
+	public async listEnabledAiNewsSettings(): Promise<AiNewsSettingRecord[]> {
+		return this.client.aiNewsSetting.findMany({
+			where: { enabled: true },
+			orderBy: { createdAt: 'asc' },
+		});
+	}
+
+	public async claimAiNewsDigest(input: {
+		settingId: string;
+		digestDate: string;
+		windowStart: Date;
+		windowEnd: Date;
+		traceId: string;
+	}): Promise<AiNewsDigestRecord> {
+		const existing = await this.client.aiNewsDigest.findUnique({
+			where: { settingId_digestDate: { settingId: input.settingId, digestDate: input.digestDate } },
+		});
+		if (existing?.status === 'PUBLISHED') return existing;
+		if (existing) {
+			return this.client.aiNewsDigest.update({
+				where: { id: existing.id },
+				data: {
+					windowStart: input.windowStart,
+					windowEnd: input.windowEnd,
+					traceId: input.traceId,
+					status: 'PROCESSING',
+					errorMessage: null,
+				},
+			});
+		}
+		try {
+			return await this.client.aiNewsDigest.create({ data: input });
+		} catch (error) {
+			if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') throw error;
+			return this.client.aiNewsDigest.findUniqueOrThrow({
+				where: { settingId_digestDate: { settingId: input.settingId, digestDate: input.digestDate } },
+			});
+		}
+	}
+
+	public async findLastPublishedAiNewsDigestAt(settingId: string): Promise<Date | null> {
+		const digest = await this.client.aiNewsDigest.findFirst({
+			where: { settingId, status: 'PUBLISHED' },
+			orderBy: { publishedAt: 'desc' },
+			select: { publishedAt: true },
+		});
+		return digest?.publishedAt ?? null;
+	}
+
+	public async findRecentAiNewsUrlHashes(discordGuildId: string, since: Date): Promise<Set<string>> {
+		const [digestItems, linkSummaries] = await Promise.all([
+			this.client.aiNewsDigestItem.findMany({
+				where: {
+					digest: {
+						status: 'PUBLISHED',
+						publishedAt: { gte: since },
+						setting: { discordGuildId },
+					},
+				},
+				select: { urlHash: true },
+			}),
+			this.client.aiNewsLinkSummary.findMany({
+				where: { discordGuildId, status: 'COMPLETED', completedAt: { gte: since } },
+				select: { urlHash: true },
+			}),
+		]);
+		return new Set([...digestItems, ...linkSummaries].map((item) => item.urlHash));
+	}
+
+	public async completeAiNewsDigest(input: {
+		digestId: string;
+		discordMessageId: string;
+		publishedAt: Date;
+		items: Array<{
+			rank: number;
+			category: string;
+			brand?: string;
+			title: string;
+			canonicalUrl: string;
+			urlHash: string;
+			provider: string;
+			evidence: object;
+			summary: object;
+		}>;
+	}): Promise<void> {
+		await this.client.$transaction(async (transaction) => {
+			await transaction.aiNewsDigestItem.deleteMany({ where: { digestId: input.digestId } });
+			if (input.items.length > 0) {
+				await transaction.aiNewsDigestItem.createMany({
+					data: input.items.map((item) => ({
+						digestId: input.digestId,
+						rank: item.rank,
+						category: item.category,
+						brand: item.brand ?? null,
+						title: item.title,
+						canonicalUrl: item.canonicalUrl,
+						urlHash: item.urlHash,
+						provider: item.provider,
+						evidenceJson: json(item.evidence),
+						summaryJson: json(item.summary),
+					})),
+				});
+			}
+			await transaction.aiNewsDigest.update({
+				where: { id: input.digestId },
+				data: {
+					status: 'PUBLISHED',
+					discordMessageId: input.discordMessageId,
+					publishedAt: input.publishedAt,
+					errorMessage: null,
+				},
+			});
+		});
+	}
+
+	public async failAiNewsDigest(digestId: string, errorMessage: string): Promise<void> {
+		await this.client.aiNewsDigest.update({
+			where: { id: digestId },
+			data: { status: 'FAILED', errorMessage: errorMessage.slice(0, 2_000) },
+		});
+	}
+
+	public async claimAiNewsLinkSummary(input: {
+		discordGuildId: string;
+		discordChannelId: string;
+		discordMessageId: string;
+		discordUserId: string;
+		canonicalUrl: string;
+		urlHash: string;
+	}): Promise<AiNewsLinkSummaryRecord> {
+		const existing = await this.client.aiNewsLinkSummary.findUnique({
+			where: {
+				discordMessageId_urlHash: {
+					discordMessageId: input.discordMessageId,
+					urlHash: input.urlHash,
+				},
+			},
+		});
+		const record = existing?.status === 'COMPLETED'
+			? existing
+			: await this.client.aiNewsLinkSummary.upsert({
+				where: {
+					discordMessageId_urlHash: {
+						discordMessageId: input.discordMessageId,
+						urlHash: input.urlHash,
+					},
+				},
+				create: input,
+				update: { status: 'PROCESSING', errorMessage: null },
+			});
+		return {
+			id: record.id,
+			canonicalUrl: record.canonicalUrl,
+			urlHash: record.urlHash,
+			status: record.status,
+			summary: record.summaryJson,
+			replyMessageId: record.replyMessageId,
+		};
+	}
+
+	public async findRecentAiNewsLinkSummary(
+		urlHash: string,
+		since: Date,
+	): Promise<AiNewsLinkSummaryRecord | null> {
+		const record = await this.client.aiNewsLinkSummary.findFirst({
+			where: { urlHash, status: 'COMPLETED', completedAt: { gte: since } },
+			orderBy: { completedAt: 'desc' },
+		});
+		return record
+			? {
+				id: record.id,
+				canonicalUrl: record.canonicalUrl,
+				urlHash: record.urlHash,
+				status: record.status,
+				summary: record.summaryJson,
+				replyMessageId: record.replyMessageId,
+			}
+			: null;
+	}
+
+	public async completeAiNewsLinkSummary(input: {
+		id: string;
+		summary: object;
+		replyMessageId: string;
+		completedAt: Date;
+	}): Promise<void> {
+		await this.client.aiNewsLinkSummary.update({
+			where: { id: input.id },
+			data: {
+				status: 'COMPLETED',
+				summaryJson: json(input.summary),
+				replyMessageId: input.replyMessageId,
+				completedAt: input.completedAt,
+				errorMessage: null,
+			},
+		});
+	}
+
+	public async failAiNewsLinkSummary(id: string, errorMessage: string): Promise<void> {
+		await this.client.aiNewsLinkSummary.update({
+			where: { id },
+			data: { status: 'FAILED', errorMessage: errorMessage.slice(0, 2_000) },
+		});
+	}
 }

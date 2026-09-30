@@ -33,6 +33,8 @@ export function setupWizardText(input: {
   projects: ProjectContext[];
   selectedProject?: ProjectContext;
   peopleCount: number;
+	aiNewsChannelId?: string;
+	aiNewsAvailable?: boolean;
 }): string {
   const project = input.selectedProject;
   const checks = [
@@ -62,6 +64,12 @@ export function setupWizardText(input: {
 - 行程通知：${project.leaveChannelId ? `<#${project.leaveChannelId}>` : '選用，尚未設定'}`
     : '';
 
+  const aiNews = input.aiNewsChannelId
+		? `\n\n**AI 新聞：** <#${input.aiNewsChannelId}>（週一至週五 09:00）`
+		: input.aiNewsAvailable
+			? '\n\n**AI 新聞：** 尚未設定，可選擇團隊建立的 #AI新聞。'
+			: '';
+
   return `🧭 **Bot 快速設定｜${completed}/4 完成**
 
 ${mark(checks[0] ?? false)} 1. 建立專案並連接 GitHub App
@@ -69,7 +77,7 @@ ${mark(checks[1] ?? false)} 2. 選擇 GitHub Repository
 ${mark(checks[2] ?? false)} 3. 設定每日工作摘要頻道
 ${mark(checks[3] ?? false)} 4. 綁定至少一位團隊成員
 
-➡️ **下一步：${next}**${projectDetails}
+➡️ **下一步：${next}**${projectDetails}${aiNews}
 
 ${projectComplete(project, input.peopleCount)
     ? '🟢 已可日常使用：成員只需在 16:30 討論串補充一兩句。'
@@ -80,6 +88,8 @@ export function setupWizardRows(input: {
   projects: ProjectContext[];
   selectedProject?: ProjectContext;
   peopleCount: number;
+	aiNewsChannelId?: string;
+	aiNewsAvailable?: boolean;
 }): SetupRow[] {
   const rows: SetupRow[] = [];
   const selected = input.selectedProject;
@@ -146,6 +156,19 @@ export function setupWizardRows(input: {
       .setDisabled(!ready),
     new ButtonBuilder().setCustomId('setup:help:root').setLabel('一般成員怎麼用').setStyle(ButtonStyle.Secondary),
   ));
+	if (input.aiNewsAvailable) {
+		rows.push(new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+			new ButtonBuilder()
+				.setCustomId('setup:ai-news:root')
+				.setLabel('設定 AI 新聞')
+				.setStyle(ButtonStyle.Secondary),
+			new ButtonBuilder()
+				.setCustomId('setup:ai-news-preview:root')
+				.setLabel('測試今日新聞')
+				.setStyle(ButtonStyle.Primary)
+				.setDisabled(!input.aiNewsChannelId),
+		));
+	}
   return rows;
 }
 
@@ -210,6 +233,17 @@ export function setupChannelPicker(projectId: string, kind: 'summary' | 'leave')
       .setMaxValues(1)
       .addChannelTypes(ChannelType.GuildText),
   )];
+}
+
+export function aiNewsChannelPicker(): SetupRow[] {
+	return [new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+		new ChannelSelectMenuBuilder()
+			.setCustomId('setup-ai-news-channel')
+			.setPlaceholder('選擇 #AI新聞')
+			.setMinValues(1)
+			.setMaxValues(1)
+			.addChannelTypes(ChannelType.GuildText),
+	)];
 }
 
 export function memberPicker(projectId: string): SetupRow[] {

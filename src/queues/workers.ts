@@ -10,10 +10,23 @@ import type { GitHubWebhookJob } from '../github/webhook-service.js';
 import type { GitHubReconciliationService } from '../github/reconciliation.js';
 import type { CalendarNotificationService } from '../google/calendar-service.js';
 import type { MonitoringAlertProcessor } from '../monitoring/webhook-service.js';
+import type { AiNewsDigestService } from '../ai-news/digest-service.js';
+import type { AiNewsLinkSummaryService } from '../ai-news/link-summary-service.js';
 import type { BullQueueSystem, QueueName } from './queue-system.js';
 
 const monitoringJobSchema = z.object({ deliveryId: z.string().min(1), payload: z.unknown() });
 const projectJobSchema = z.object({ projectBindingId: z.string().uuid().optional() }).passthrough();
+const aiNewsDigestJobSchema = z.object({
+	guildId: z.string().min(1).optional(),
+	preview: z.boolean().optional().default(false),
+});
+const aiNewsLinkJobSchema = z.object({
+	guildId: z.string().min(1),
+	channelId: z.string().min(1),
+	messageId: z.string().min(1),
+	userId: z.string().min(1),
+	urls: z.array(z.string().url()).min(1).max(3),
+});
 
 const githubJobSchema = z.object({
   deliveryId: z.string().min(1),
@@ -35,6 +48,11 @@ export class WorkerSystem {
     private readonly leaves: LeaveService,
     private readonly calendar: CalendarNotificationService | undefined,
     private readonly monitoring: MonitoringAlertProcessor | undefined,
+    private readonly aiNews: {
+		digest: AiNewsDigestService;
+		linkSummary: AiNewsLinkSummaryService;
+		notifyFailure?: (message: string) => Promise<void>;
+	} | undefined,
     private readonly logger: Logger,
   ) {}
 
@@ -80,6 +98,15 @@ export class WorkerSystem {
         await this.monitoring?.process({ deliveryId: parsed.deliveryId, payload: parsed.payload });
       });
     }
+		if (this.aiNews) {
+			this.createWorker('ai-news-digest', async (job) => {
+				const parsed = aiNewsDigestJobSchema.parse(job.data);
+				await this.aiNews?.digest.run(new Date(), parsed.guildId, parsed.preview);
+			});
+			this.createWorker('ai-news-link-summary', async (job) => {
+				await this.aiNews?.linkSummary.run(aiNewsLinkJobSchema.parse(job.data));
+			});
+		}
   }
 
   private createWorker(name: QueueName, processor: (job: Job) => Promise<void>): void {
@@ -98,6 +125,10 @@ export class WorkerSystem {
           { originalJobId: job.id, originalName: job.name, data: failedData, error: error.message },
           { jobId: `dead-letter-${job.id ?? 'unknown'}`, attempts: 1 },
         );
+				if (name === 'ai-news-digest' && this.aiNews?.notifyFailure) {
+					void this.aiNews.notifyFailure(`AI 新聞早報已用完重試次數，請檢查 Worker 與來源狀態。Job ID：${job.id ?? 'unknown'}`)
+						.catch((notifyError: unknown) => this.logger.error({ err: notifyError, jobId: job.id }, 'AI news failure notification failed'));
+				}
       }
     });
     worker.on('error', (error) => this.logger.error({ queue: name, err: error }, 'worker error'));

@@ -47,6 +47,8 @@ export interface DiscordThreadMessage {
 
 export interface DiscordAdapter {
   sendChannelMessage(channelId: string, content: string): Promise<string>;
+	replyToMessage?: (channelId: string, messageId: string, content: string) => Promise<string>;
+	findRecentChannelMessageByMarker?: (channelId: string, marker: string) => Promise<string | null>;
   sendDirectMessage(userId: string, content: string, buttons?: DiscordButton[]): Promise<string>;
   createThread?: (input: {
     channelId: string;

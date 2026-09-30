@@ -48,6 +48,13 @@ export class JobScheduler {
         { name: 'upcoming', data: {}, opts: { attempts: 3 } },
       ));
     }
+    if (this.config.aiNews.enabled) {
+      registrations.push(this.queues.queue('ai-news-digest').upsertJobScheduler(
+        'ai-news-digest-schedule',
+        { pattern: this.config.schedules.aiNews, tz: this.config.timezone },
+        { name: 'publish', data: {}, opts: { attempts: 3 } },
+      ));
+    }
     await Promise.all(registrations);
   }
 }

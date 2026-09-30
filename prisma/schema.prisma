@@ -62,6 +62,18 @@ enum DailyReportStatus {
   SUMMARIZED
 }
 
+enum AiNewsDigestStatus {
+	PROCESSING
+	PUBLISHED
+	FAILED
+}
+
+enum AiNewsLinkSummaryStatus {
+	PROCESSING
+	COMPLETED
+	FAILED
+}
+
 model Person {
   id            String          @id @default(uuid()) @db.Uuid
   displayName   String          @map("display_name")
@@ -307,4 +319,81 @@ model AuditLog {
   @@index([resourceType, resourceId])
   @@index([requestId])
   @@map("audit_logs")
+}
+
+model AiNewsSetting {
+	id               String         @id @default(uuid()) @db.Uuid
+	discordGuildId   String         @unique @map("discord_guild_id")
+	discordChannelId String         @map("discord_channel_id")
+	enabled          Boolean        @default(true)
+	createdAt        DateTime       @default(now()) @map("created_at")
+	updatedAt        DateTime       @updatedAt @map("updated_at")
+	digests          AiNewsDigest[]
+
+	@@index([enabled])
+	@@map("ai_news_settings")
+}
+
+model AiNewsDigest {
+	id               String             @id @default(uuid()) @db.Uuid
+	settingId        String             @map("setting_id") @db.Uuid
+	digestDate       String             @map("digest_date")
+	windowStart      DateTime           @map("window_start")
+	windowEnd        DateTime           @map("window_end")
+	status           AiNewsDigestStatus @default(PROCESSING)
+	discordMessageId String?            @map("discord_message_id")
+	traceId          String             @map("trace_id")
+	errorMessage     String?            @map("error_message")
+	publishedAt      DateTime?          @map("published_at")
+	createdAt        DateTime           @default(now()) @map("created_at")
+	updatedAt        DateTime           @updatedAt @map("updated_at")
+	setting          AiNewsSetting      @relation(fields: [settingId], references: [id], onDelete: Cascade)
+	items            AiNewsDigestItem[]
+
+	@@unique([settingId, digestDate])
+	@@index([status, createdAt])
+	@@index([settingId, publishedAt])
+	@@map("ai_news_digests")
+}
+
+model AiNewsDigestItem {
+	id           String       @id @default(uuid()) @db.Uuid
+	digestId     String       @map("digest_id") @db.Uuid
+	rank         Int
+	category     String
+	brand        String?
+	title        String
+	canonicalUrl String       @map("canonical_url")
+	urlHash      String       @map("url_hash")
+	provider     String
+	evidenceJson Json         @map("evidence_json")
+	summaryJson  Json         @map("summary_json")
+	createdAt    DateTime     @default(now()) @map("created_at")
+	digest       AiNewsDigest @relation(fields: [digestId], references: [id], onDelete: Cascade)
+
+	@@unique([digestId, rank])
+	@@index([urlHash, createdAt])
+	@@map("ai_news_digest_items")
+}
+
+model AiNewsLinkSummary {
+	id               String                  @id @default(uuid()) @db.Uuid
+	discordGuildId   String                  @map("discord_guild_id")
+	discordChannelId String                  @map("discord_channel_id")
+	discordMessageId String                  @map("discord_message_id")
+	discordUserId    String                  @map("discord_user_id")
+	canonicalUrl     String                  @map("canonical_url")
+	urlHash          String                  @map("url_hash")
+	status           AiNewsLinkSummaryStatus @default(PROCESSING)
+	summaryJson      Json?                   @map("summary_json")
+	replyMessageId   String?                 @map("reply_message_id")
+	errorMessage     String?                 @map("error_message")
+	completedAt      DateTime?               @map("completed_at")
+	createdAt        DateTime                @default(now()) @map("created_at")
+	updatedAt        DateTime                @updatedAt @map("updated_at")
+
+	@@unique([discordMessageId, urlHash])
+	@@index([urlHash, status, completedAt])
+	@@index([discordGuildId, discordChannelId, createdAt])
+	@@map("ai_news_link_summaries")
 }
