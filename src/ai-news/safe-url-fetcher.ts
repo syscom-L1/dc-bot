@@ -65,6 +65,17 @@ async function validateAndResolve(url: URL): Promise<{ address: string; family: 
 	return { address: first.address, family: first.family };
 }
 
+// Node 20+ 的 autoSelectFamily 會以 { all: true } 呼叫 lookup，此時必須回傳位址陣列
+function createPinnedLookup(resolved: { address: string; family: 4 | 6 }): LookupFunction {
+	return (_hostname, options, callback) => {
+		if (options.all) {
+			callback(null, [{ address: resolved.address, family: resolved.family }]);
+			return;
+		}
+		callback(null, resolved.address, resolved.family);
+	};
+}
+
 function decodeEntities(value: string): string {
 	return value
 		.replace(/&nbsp;/giu, ' ')
@@ -113,9 +124,7 @@ function extractArticle(html: string, canonicalUrl: string, contentType: string)
 
 async function download(url: URL, redirectCount: number): Promise<FetchedArticle> {
 	const resolved = await validateAndResolve(url);
-	const pinnedLookup: LookupFunction = (_hostname, _options, callback) => {
-		callback(null, resolved.address, resolved.family);
-	};
+	const pinnedLookup = createPinnedLookup(resolved);
 	return new Promise((resolve, reject) => {
 		const request = httpsRequest(url, {
 			method: 'GET',
@@ -193,4 +202,4 @@ export class SafeUrlFetcher {
 	}
 }
 
-export const safeUrlInternals = { isUnsafeIp };
+export const safeUrlInternals = { isUnsafeIp, createPinnedLookup };
