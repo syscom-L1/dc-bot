@@ -1,3 +1,4 @@
+import { connect, createServer, type AddressInfo } from 'node:net';
 import { describe, expect, it } from 'vitest';
 import { safeUrlInternals } from '../../src/ai-news/safe-url-fetcher.js';
 import { canonicalizeNewsUrl, extractHttpsUrls } from '../../src/ai-news/url.js';
@@ -33,5 +34,38 @@ describe('AI news URL handling', () => {
 		}
 		expect(safeUrlInternals.isUnsafeIp('1.1.1.1')).toBe(false);
 		expect(safeUrlInternals.isUnsafeIp('2606:4700:4700::1111')).toBe(false);
+	});
+
+	it('pinned lookup returns an address array when options.all is true', () => {
+		const lookup = safeUrlInternals.createPinnedLookup({ address: '1.1.1.1', family: 4 });
+		let result: unknown;
+		lookup('example.com', { all: true }, (_error, address) => { result = address; });
+		expect(result).toEqual([{ address: '1.1.1.1', family: 4 }]);
+	});
+
+	it('pinned lookup returns a single address when options.all is not set', () => {
+		const lookup = safeUrlInternals.createPinnedLookup({ address: '2606:4700:4700::1111', family: 6 });
+		let result: unknown[] = [];
+		(lookup as (h: string, o: object, cb: (...args: unknown[]) => void) => void)('example.com', {}, (_error, ...rest) => { result = rest; });
+		expect(result).toEqual(['2606:4700:4700::1111', 6]);
+	});
+
+	it('pinned lookup works with a real connection using autoSelectFamily', async () => {
+		const server = createServer((socket) => socket.end('ok'));
+		await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+		const { port } = server.address() as AddressInfo;
+		const lookup = safeUrlInternals.createPinnedLookup({ address: '127.0.0.1', family: 4 });
+		try {
+			const data = await new Promise<string>((resolve, reject) => {
+				const socket = connect({ host: 'pinned.test', port, lookup, autoSelectFamily: true });
+				let body = '';
+				socket.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+				socket.on('end', () => resolve(body));
+				socket.on('error', reject);
+			});
+			expect(data).toBe('ok');
+		} finally {
+			server.close();
+		}
 	});
 });
